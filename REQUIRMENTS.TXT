@@ -1,0 +1,1057 @@
+# RecoverAI — Project Requirements & Technical Specification
+
+Version: 1.0
+Status: LOCKED — Pre-Development Specification
+
+---
+
+## 1. PROJECT OVERVIEW
+
+### Project Name
+
+RecoverAI
+
+### Purpose
+
+RecoverAI is a provider-agnostic payment recovery intelligence platform for businesses.
+
+It analyzes failed payment events, determines whether a payment is worth attempting to recover, estimates the potentially recoverable amount, recommends an appropriate recovery action, and tracks the actual recovery outcome.
+
+RecoverAI must be designed so that external payment providers such as Razorpay, Stripe, PayPal, or future providers can be connected without changing the RecoverAI core engine.
+
+---
+
+# 2. CORE PROBLEM
+
+Businesses lose revenue when legitimate customer payments fail.
+
+A business may have thousands of failed payment events but does not necessarily know:
+
+* Why a payment failed.
+* Which failures are worth recovering.
+* How much revenue could potentially be recovered.
+* Which recovery action should be attempted.
+* Whether the recovery attempt actually succeeded.
+
+RecoverAI provides this intelligence through a centralized dashboard and recovery engine.
+
+---
+
+# 3. CORE QUESTIONS RECOVERAI MUST ANSWER
+
+For every relevant failed payment, RecoverAI should determine:
+
+1. Why did the payment fail?
+2. Is this payment worth attempting to recover?
+3. What amount is potentially recoverable?
+4. What recovery action should be recommended?
+5. What actually happened after the recovery attempt?
+6. How effective was the recovery process?
+
+---
+
+# 4. TARGET USERS
+
+Primary users:
+
+* Business owners
+* Finance teams
+* Payment/operations teams
+* Revenue/recovery teams
+* Authorized company administrators
+
+The dashboard is intended for authorized business users.
+
+RecoverAI is not primarily a customer-facing payment application.
+
+---
+
+# 5. PROVIDER-AGNOSTIC REQUIREMENT
+
+RecoverAI MUST NOT be tightly coupled to Razorpay.
+
+Supported/future providers may include:
+
+* Razorpay
+* Stripe
+* PayPal
+* Other payment providers
+
+The provider integration must be isolated behind an integration boundary.
+
+Architecture:
+
+External Provider
+↓
+Provider Adapter
+↓
+Canonical Payment Event
+↓
+RecoverAI Core
+↓
+Analysis / AI / Recovery Engine
+
+The RecoverAI core must operate on its own canonical payment-event format rather than provider-specific objects.
+
+---
+
+# 6. DEMO/SANDBOX MODE
+
+The first implementation will use synthetic/dummy payment data.
+
+The dashboard must clearly identify synthetic data as:
+
+DEMO / SANDBOX DATA
+
+Synthetic data must never be presented as real production payment data.
+
+The demo must use the same conceptual integration boundary as a real provider.
+
+Architecture:
+
+Synthetic Data
+↓
+Demo Adapter
+↓
+Canonical Payment Event
+↓
+RecoverAI Core
+
+Later:
+
+Razorpay
+↓
+Razorpay Adapter
+↓
+Canonical Payment Event
+↓
+Same RecoverAI Core
+
+The core engine must not require rewriting when moving from demo data to real provider integration.
+
+---
+
+# 7. COMPLETE PAYMENT EVENT PIPELINE
+
+The complete pipeline is:
+
+Payment Provider / Demo Source
+↓
+Event Ingestion
+↓
+Validation
+↓
+Normalization
+↓
+Canonical Payment Event
+↓
+Event Processing
+↓
+Failure Analysis
+↓
+Recovery-Worthiness Analysis
+↓
+Recoverable Amount Estimation
+↓
+Recovery Recommendation
+↓
+Recovery Execution / Tracking
+↓
+Actual Recovery Result
+↓
+Persistence
+↓
+Analytics
+↓
+Dashboard
+
+Every stage must have clear responsibilities and interfaces.
+
+---
+
+# 8. CANONICAL PAYMENT EVENT
+
+RecoverAI must define a provider-independent payment-event contract.
+
+The canonical event should contain the information required by the core engine, such as:
+
+* Internal payment ID
+* External/provider payment ID
+* Customer reference
+* Amount
+* Currency
+* Payment status
+* Failure status/reason
+* Payment method
+* Provider
+* Event type
+* Timestamp
+* Relevant metadata
+* Recovery status
+* Recovery result
+
+Provider-specific fields must remain isolated where possible.
+
+The canonical event is the contract between integrations and the RecoverAI core.
+
+---
+
+# 9. FAILURE ANALYSIS
+
+RecoverAI must classify and analyze payment failures.
+
+The system should be capable of identifying categories such as:
+
+* Authentication failures
+* Insufficient funds
+* Network/technical failures
+* Bank-related failures
+* Card-related failures
+* Provider-side failures
+* Customer-action-required failures
+* Temporary failures
+* Other/unknown failures
+
+The failure-analysis layer must produce a normalized failure category and relevant reasoning.
+
+Provider-specific failure codes must be mapped into RecoverAI's normalized failure taxonomy.
+
+---
+
+# 10. RECOVERY-WORTHINESS
+
+RecoverAI must determine whether attempting recovery is worthwhile.
+
+The decision can use factors such as:
+
+* Failure type
+* Payment amount
+* Failure characteristics
+* Customer/payment context
+* Historical recovery behavior
+* Probability of successful recovery
+* Expected recovery value
+
+The system must produce a clear recovery-worthiness result.
+
+Example conceptual output:
+
+* Recover
+* Do not recover
+* Review/uncertain
+
+The exact scoring thresholds must be defined during implementation and testing.
+
+---
+
+# 11. RECOVERABLE AMOUNT
+
+RecoverAI must estimate the amount that could potentially be recovered.
+
+The system must distinguish between:
+
+* Original payment amount
+* Estimated recoverable amount
+* Actually recovered amount
+
+These values must not be treated as interchangeable.
+
+---
+
+# 12. RECOVERY RECOMMENDATION
+
+RecoverAI must recommend a suitable recovery action.
+
+The recommendation layer must be modular.
+
+Possible action categories may include actions appropriate to the payment failure and provider capabilities.
+
+The exact supported actions will be defined during implementation based on the available payment/recovery mechanisms.
+
+The recommendation engine must not be tightly coupled to one payment provider.
+
+---
+
+# 13. ACTUAL RECOVERY RESULT
+
+RecoverAI must track what happened after a recovery action.
+
+Important states include:
+
+* Not attempted
+* Recommended
+* Attempted
+* Successful
+* Failed
+* Cancelled
+* Expired
+* Unknown
+
+The system must preserve the distinction between:
+
+Prediction/Recommendation
+
+and
+
+Actual Outcome.
+
+Actual outcomes should be available for analytics and future model improvement.
+
+---
+
+# 14. AI/ML STRATEGY
+
+RecoverAI will use a hybrid intelligence architecture.
+
+Rules/deterministic logic and ML must be separate components.
+
+Conceptual architecture:
+
+Payment Event
+↓
+Rules / Deterministic Analysis
++
+ML Intelligence
+↓
+Recovery Decision
+↓
+Recommendation
+
+The ML system must not be directly embedded into the payment-provider integration.
+
+---
+
+# 15. ML DEVELOPMENT APPROACH
+
+ML training is part of the project, but it will NOT be the first implementation step.
+
+Initial stage:
+
+Synthetic Data
+↓
+Data Processing
+↓
+Rules / Deterministic Scoring
+↓
+Working RecoverAI Demo
+
+Later:
+
+Historical/validated payment data
+↓
+Data Cleaning
+↓
+Feature Engineering
+↓
+Dataset Creation
+↓
+Train / Validation / Test Split
+↓
+Model Training
+↓
+Evaluation
+↓
+Model Versioning
+↓
+Inference Service
+↓
+RecoverAI Core
+
+The project must not claim production-quality ML performance without appropriate training and evaluation data.
+
+---
+
+# 16. ML RESPONSIBILITIES
+
+The ML layer may be used to improve:
+
+* Recovery-success probability
+* Recovery-worthiness prediction
+* Expected recovery value
+* Recovery-action selection
+* Confidence estimation
+
+The exact model/task selection must be validated using available data.
+
+The ML model must have a clearly defined input/output contract.
+
+---
+
+# 17. ML SERVICE
+
+The ML layer will be implemented separately from the main application.
+
+Preferred stack:
+
+* Python
+* Pandas
+* NumPy
+* scikit-learn
+* FastAPI
+
+The ML service must communicate with the main RecoverAI backend through a defined API/service boundary.
+
+The core application must not depend on Python implementation details.
+
+---
+
+# 18. LOCKED TECHNOLOGY STACK
+
+## Frontend
+
+* Next.js
+* TypeScript
+* Tailwind CSS
+* shadcn/ui
+
+## Backend
+
+* Node.js
+* TypeScript
+* REST API
+
+## Database
+
+* PostgreSQL
+* Prisma ORM
+
+## Validation
+
+* Zod
+
+## ML/Data
+
+* Python
+* Pandas
+* NumPy
+* scikit-learn
+
+## ML API
+
+* FastAPI
+
+## Testing
+
+* Frontend/backend testing appropriate to the TypeScript stack
+* Python testing with Pytest
+* API/integration testing
+
+## Deployment
+
+* Docker-ready architecture
+
+Technology changes must not be introduced without a clear project-level reason.
+
+---
+
+# 19. SYSTEM ARCHITECTURE
+
+High-level architecture:
+
+Client
+↓
+Next.js Application
+↓
+Backend API
+↓
+Application Services
+↓
+RecoverAI Core
+├── Payment Processing
+├── Failure Analysis
+├── Recovery-Worthiness
+├── Amount Estimation
+├── Recommendation
+└── Outcome Tracking
+↓
+PostgreSQL
+
+External providers connect through:
+
+Provider
+↓
+Provider Adapter
+↓
+Canonical Event
+↓
+RecoverAI Core
+
+ML connects through:
+
+RecoverAI Core
+↓
+ML Service API
+↓
+Python ML Service
+↓
+Model
+↓
+Prediction
+↓
+RecoverAI Core
+
+---
+
+# 20. PROJECT STRUCTURE
+
+The final project should follow a modular structure similar to:
+
+recoverai/
+│
+├── app/
+│   ├── frontend/
+│   ├── backend/
+│   └── ml-service/
+│
+├── packages/
+│   ├── shared/
+│   ├── contracts/
+│   └── config/
+│
+├── database/
+│   ├── prisma/
+│   ├── migrations/
+│   └── seed/
+│
+├── integrations/
+│   ├── demo/
+│   ├── razorpay/
+│   └── providers/
+│
+├── ml/
+│   ├── data/
+│   ├── features/
+│   ├── training/
+│   ├── evaluation/
+│   └── models/
+│
+├── tests/
+│   ├── unit/
+│   ├── integration/
+│   └── e2e/
+│
+├── docs/
+│
+├── REQUIREMENTS.txt
+├── README.md
+├── .env.example
+├── docker-compose.yml
+└── package configuration files
+
+The exact framework-specific folder structure will be finalized during Phase 1 without violating these architectural boundaries.
+
+---
+
+# 21. DATABASE REQUIREMENTS
+
+The database must support at minimum the concepts of:
+
+* Users
+* Companies
+* Payment events
+* Payment failures
+* Recovery assessments
+* Recovery recommendations
+* Recovery attempts
+* Recovery outcomes
+* Provider/integration information
+* Analytics-related information
+* Model/prediction information where required
+
+Database design must maintain proper relationships, indexes, constraints, timestamps, and auditability.
+
+The exact schema will be finalized before implementation of database-dependent features.
+
+---
+
+# 22. API REQUIREMENTS
+
+The backend must expose clear APIs for:
+
+* Authentication
+* Company/user access
+* Payment events
+* Failed payments
+* Recovery analysis
+* Recovery recommendations
+* Recovery status
+* Recovery outcomes
+* Dashboard metrics
+* Analytics
+* Provider integration
+* Health/status checks
+
+API contracts must be documented and versionable.
+
+Provider-specific API details must remain inside the integration boundary.
+
+---
+
+# 23. DASHBOARD
+
+The dashboard must provide a clear view of:
+
+* Total payments
+* Failed payments
+* Recovery opportunities
+* Estimated recoverable amount
+* Actual recovered amount
+* Recovery rate
+* Recovery status
+* Failure categories
+* Recovery recommendations
+* Recent payment/recovery activity
+* Relevant trends/analytics
+
+The dashboard should allow users to move from high-level metrics into individual payment/recovery details.
+
+---
+
+# 24. USER FLOW
+
+Primary flow:
+
+Login
+↓
+Dashboard
+↓
+Payment/Recovery Overview
+↓
+Failed Payment
+↓
+Failure Details
+↓
+Recovery Assessment
+↓
+Estimated Recoverable Amount
+↓
+Recommended Action
+↓
+Recovery Status
+↓
+Actual Outcome
+
+The interface must clearly distinguish estimated/predicted information from actual results.
+
+---
+
+# 25. THEME REQUIREMENT
+
+The UI must support:
+
+* Light theme
+* Dark theme
+* System theme
+
+System theme should automatically follow the user's operating-system preference.
+
+The design system must remain consistent across themes.
+
+---
+
+# 26. SECURITY REQUIREMENTS
+
+Security must be considered from the beginning.
+
+Requirements include:
+
+* Secure authentication
+* Authorization
+* Protected API routes
+* Input validation
+* Environment-variable based secrets
+* No secrets committed to Git
+* Secure provider credentials
+* Proper database access controls
+* Protection against common web vulnerabilities
+* Safe error handling
+* Logging without exposing sensitive payment information
+* Proper handling of customer/payment data
+
+Production payment credentials must never be included in synthetic/demo data.
+
+---
+
+# 27. SCALABILITY REQUIREMENTS
+
+The architecture must support growth in:
+
+* Number of companies
+* Number of payment events
+* Number of recovery attempts
+* Number of users
+* Number of providers
+* ML inference volume
+
+The core must avoid unnecessary state coupling and provider-specific assumptions.
+
+Database indexes and efficient queries must be considered from the beginning.
+
+---
+
+# 28. RELIABILITY REQUIREMENTS
+
+The system should be designed for:
+
+* Idempotent payment-event processing
+* Safe retries
+* Failure isolation
+* Clear event states
+* Error handling
+* Consistent persistence
+* Recovery tracking
+* Health checks
+* Appropriate logging
+* Service boundaries
+
+A duplicate payment event must not incorrectly create duplicate business outcomes.
+
+---
+
+# 29. MODULARITY AND LOOSE COUPLING
+
+Each major responsibility must be independently replaceable.
+
+Examples:
+
+* Razorpay adapter can be replaced.
+* Demo adapter can be replaced.
+* ML model can be replaced.
+* Rules engine can be improved.
+* Database implementation can evolve.
+* Recovery recommendation logic can evolve.
+
+The core business logic must not depend directly on provider SDKs.
+
+---
+
+# 30. SOLID PRINCIPLES
+
+The implementation must follow SOLID principles.
+
+Important expectations:
+
+* Single Responsibility
+* Open/Closed
+* Liskov Substitution
+* Interface Segregation
+* Dependency Inversion
+
+Business logic should depend on abstractions/interfaces rather than concrete external providers.
+
+---
+
+# 31. TESTING
+
+Testing must be included throughout development.
+
+Required categories:
+
+* Unit tests
+* Integration tests
+* API tests
+* Database tests where appropriate
+* End-to-end tests
+* ML/data tests
+* Provider adapter tests
+
+Important scenarios include:
+
+* Valid payment event
+* Invalid event
+* Duplicate event
+* Failed payment
+* Recoverable payment
+* Non-recoverable payment
+* Recovery attempt
+* Successful recovery
+* Failed recovery
+* Provider integration failure
+* ML prediction failure
+* Database failure
+
+---
+
+# 32. OBSERVABILITY
+
+The system should provide sufficient:
+
+* Application logging
+* Error logging
+* Integration logging
+* ML inference logging
+* Recovery-event tracking
+* Health checks
+
+Logs must not expose sensitive credentials or unnecessary customer/payment information.
+
+---
+
+# 33. DATA AND ML FEEDBACK LOOP
+
+Actual recovery outcomes should be stored separately from predictions.
+
+Conceptual loop:
+
+Prediction
+↓
+Recovery Action
+↓
+Actual Outcome
+↓
+Stored Result
+↓
+Evaluation Dataset
+↓
+Future Model Improvement
+
+The feedback loop must not automatically retrain production models without validation.
+
+---
+
+# 34. DEVELOPMENT PHASES
+
+## Phase 0 — Specification
+
+* Finalize REQUIREMENTS.txt
+* Lock architecture
+* Lock technology stack
+* Define project boundaries
+* Define canonical payment event
+* Define initial database concepts
+* Define API boundaries
+* Define UI requirements
+
+## Phase 1 — Project Foundation
+
+* Repository setup
+* Application structure
+* TypeScript configuration
+* Next.js setup
+* Tailwind/shadcn setup
+* Backend setup
+* Database setup
+* Environment configuration
+* Base theme
+* Base testing setup
+
+## Phase 2 — Data Layer
+
+* Prisma schema
+* PostgreSQL connection
+* Migrations
+* Seed/demo data
+* Canonical payment-event model
+
+## Phase 3 — Payment Pipeline
+
+* Demo adapter
+* Event ingestion
+* Validation
+* Normalization
+* Idempotency
+* Event persistence
+* Processing pipeline
+
+## Phase 4 — Recovery Intelligence
+
+* Failure classification
+* Recovery-worthiness logic
+* Recoverable amount estimation
+* Initial deterministic scoring
+* Recommendation engine
+
+## Phase 5 — ML Foundation
+
+* Dataset design
+* Feature engineering
+* Synthetic/historical dataset preparation
+* Training pipeline
+* Baseline model
+* Evaluation metrics
+
+## Phase 6 — ML Service
+
+* FastAPI service
+* Model loading
+* Prediction endpoint
+* Input/output contracts
+* Model versioning
+* Backend integration
+
+## Phase 7 — Recovery Tracking
+
+* Recovery attempts
+* Recovery states
+* Actual outcomes
+* Outcome persistence
+* Analytics data
+
+## Phase 8 — Dashboard
+
+* Dashboard layout
+* KPIs
+* Failed payment list
+* Payment details
+* Recovery insights
+* Recommendations
+* Recovery results
+* Analytics
+* Theme support
+
+## Phase 9 — Testing & Hardening
+
+* Unit tests
+* Integration tests
+* API tests
+* E2E tests
+* ML evaluation
+* Security review
+* Reliability testing
+* Error handling
+* Performance testing
+
+## Phase 10 — Provider Integration Boundary
+
+* Finalize provider interface
+* Implement provider adapter
+* Keep provider-specific logic isolated
+* Validate canonical event conversion
+* Test without modifying core engine
+
+## Phase 11 — Production Readiness
+
+* Docker
+* Environment management
+* Deployment configuration
+* Monitoring/logging
+* Security hardening
+* Database optimization
+* Reliability review
+* Documentation
+
+---
+
+# 35. DEMO SUCCESS CRITERIA
+
+The demo is successful when:
+
+1. Synthetic payment data can enter RecoverAI.
+2. Payment events are validated and normalized.
+3. Failed payments are classified.
+4. Recovery-worthiness is calculated.
+5. Recoverable amount is estimated.
+6. Recovery action is recommended.
+7. Recovery outcome can be recorded.
+8. Dashboard displays the complete flow.
+9. Demo data is clearly marked as DEMO/SANDBOX.
+10. Core engine does not depend on Razorpay-specific code.
+
+---
+
+# 36. PROVIDER-INTEGRATION SUCCESS CRITERIA
+
+A future provider integration is successful when:
+
+Provider
+↓
+Provider Adapter
+↓
+Canonical Payment Event
+↓
+Existing RecoverAI Core
+
+can operate without rewriting the core recovery engine.
+
+Adding a provider must primarily require implementing the provider's integration/adapter layer and mapping its events to the canonical RecoverAI contract.
+
+---
+
+# 37. OUT OF SCOPE
+
+The following are explicitly NOT part of the initial project:
+
+* Building a new payment gateway
+* Replacing Razorpay/Stripe/other payment providers
+* Processing customer payments ourselves
+* Building unnecessary banking infrastructure
+* Building unrelated fintech products
+* Supporting every payment provider from the beginning
+* Building multiple duplicated demo/prod cores
+* Creating separate core engines for each provider
+* Claiming production ML accuracy without proper data/evaluation
+* Random AI features unrelated to payment recovery
+* Unnecessary microservices
+* Unnecessary technology additions
+* Features outside the approved requirements
+
+Scope must not expand without an explicit project-level decision.
+
+---
+
+# 38. ENGINEERING RULES
+
+The following rules are locked:
+
+1. Do not bypass the defined architecture.
+2. Do not place provider-specific logic inside the core engine.
+3. Do not create duplicated business logic for demo and production.
+4. Do not introduce technologies without a clear requirement.
+5. Do not change the locked stack unnecessarily.
+6. Do not implement features outside the defined scope.
+7. Keep modules independently testable.
+8. Prefer interfaces and dependency inversion.
+9. Keep AI/ML behind a clear service boundary.
+10. Keep predicted values separate from actual outcomes.
+11. Treat synthetic data as demo-only.
+12. Keep security requirements active from the first implementation.
+13. Build phase-by-phase.
+14. Complete and validate the current phase before moving to the next phase.
+
+---
+
+# 39. SOURCE OF TRUTH
+
+This file is the primary project specification.
+
+Implementation decisions must remain consistent with this document.
+
+If a future requirement conflicts with this specification, the requirement must be explicitly reviewed and the specification updated before implementation.
+
+Do not silently change architecture, technology, scope, or core behavior.
+
+---
+
+# 40. FINAL PRODUCT VISION
+
+RecoverAI should provide a provider-independent intelligence layer that converts payment failures into actionable recovery decisions.
+
+The final conceptual system is:
+
+Payment Provider
+↓
+Integration Adapter
+↓
+Canonical Payment Event
+↓
+RecoverAI Processing Pipeline
+↓
+Failure Analysis
+↓
+Recovery Intelligence
+├── Rules
+└── ML
+↓
+Recovery Recommendation
+↓
+Recovery Attempt
+↓
+Actual Outcome
+↓
+Analytics / Feedback
+↓
+Business Dashboard
+
+The architecture must allow RecoverAI to begin as a synthetic-data demonstration and evolve into a production system connected to Razorpay or another payment provider without rewriting the core engine.
+
+END OF REQUIREMENTS
