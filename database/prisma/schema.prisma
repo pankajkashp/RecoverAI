@@ -1,3 +1,15 @@
+// RecoverAI — Database Schema
+// Phase 2: Data Layer Foundation
+//
+// This schema defines the persistence layer for the RecoverAI
+// payment recovery intelligence platform.
+//
+// Models support: companies, users, providers, canonical payment events,
+// failure information, recovery assessments, recommendations, attempts,
+// outcomes, and ML predictions.
+//
+// No business logic is implemented at this layer.
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -5,4 +17,275 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum ProviderType {
+  DEMO
+  RAZORPAY
+  STRIPE
+  PAYPAL
+  OTHER
+}
+
+enum PaymentStatus {
+  PENDING
+  AUTHORIZED
+  COMPLETED
+  FAILED
+  REFUNDED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CARD
+  UPI
+  NETBANKING
+  WALLET
+  BANK_TRANSFER
+  OTHER
+}
+
+enum EventType {
+  PAYMENT_CREATED
+  PAYMENT_AUTHORIZED
+  PAYMENT_COMPLETED
+  PAYMENT_FAILED
+  PAYMENT_REFUNDED
+  OTHER
+}
+
+enum FailureCategory {
+  AUTHENTICATION
+  INSUFFICIENT_FUNDS
+  NETWORK
+  BANK
+  CARD
+  PROVIDER
+  CUSTOMER_ACTION_REQUIRED
+  TEMPORARY
+  UNKNOWN
+}
+
+enum RecoveryWorthiness {
+  RECOVER
+  DO_NOT_RECOVER
+  REVIEW
+}
+
+enum RecommendationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  EXECUTED
+  EXPIRED
+}
+
+enum RecoveryAttemptStatus {
+  NOT_ATTEMPTED
+  RECOMMENDED
+  ATTEMPTED
+  SUCCESSFUL
+  FAILED
+  CANCELLED
+  EXPIRED
+  UNKNOWN
+}
+
+// ---------------------------------------------------------------------------
+// Models
+// ---------------------------------------------------------------------------
+
+/// A business using RecoverAI.
+model Company {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  users    User[]
+  payments PaymentEvent[]
+
+  @@map("companies")
+}
+
+/// An authorized dashboard user belonging to a company.
+model User {
+  id        String   @id @default(cuid())
+  companyId String   @map("company_id")
+  name      String
+  email     String   @unique
+  role      UserRole @default(MEMBER)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  @@index([companyId])
+  @@map("users")
+}
+
+/// A payment provider or integration source (Demo, Razorpay, Stripe, etc.).
+/// Provider-agnostic: no assumptions about a single provider.
+model Provider {
+  id        String       @id @default(cuid())
+  type      ProviderType
+  name      String
+  isActive  Boolean      @default(true) @map("is_active")
+  config    Json?
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+
+  payments PaymentEvent[]
+
+  @@map("providers")
+}
+
+/// A canonical payment event — provider-independent.
+/// This is the contract between integrations and the RecoverAI core.
+model PaymentEvent {
+  id                String        @id @default(cuid())
+  externalPaymentId String        @map("external_payment_id")
+  companyId         String        @map("company_id")
+  providerId        String        @map("provider_id")
+  customerReference String?       @map("customer_reference")
+  amount            Decimal       @db.Decimal(12, 2)
+  currency          String        @db.VarChar(3)
+  status            PaymentStatus
+  paymentMethod     PaymentMethod @default(OTHER) @map("payment_method")
+  eventType         EventType     @map("event_type")
+  failureCode       String?       @map("failure_code")
+  failureMessage    String?       @map("failure_message")
+  eventTimestamp    DateTime      @map("event_timestamp")
+  metadata          Json?
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  company        Company                 @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  provider       Provider                @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  failure        PaymentFailure?
+  assessment     RecoveryAssessment?
+  recommendation RecoveryRecommendation?
+  attempts       RecoveryAttempt[]
+  predictions    MlPrediction[]
+
+  // Idempotency: prevent duplicate business records from the same provider event
+  @@unique([providerId, externalPaymentId, companyId], name: "provider_external_company_unique")
+  @@index([companyId])
+  @@index([status])
+  @@index([providerId])
+  @@index([externalPaymentId])
+  @@index([eventTimestamp])
+  @@map("payment_events")
+}
+
+/// Normalized payment failure information for a failed payment event.
+model PaymentFailure {
+  id             String          @id @default(cuid())
+  paymentEventId String          @unique @map("payment_event_id")
+  category       FailureCategory @default(UNKNOWN)
+  failureCode    String?         @map("failure_code")
+  failureMessage String?         @map("failure_message")
+  failedAt       DateTime        @map("failed_at")
+  createdAt      DateTime        @default(now()) @map("created_at")
+
+  paymentEvent PaymentEvent @relation(fields: [paymentEventId], references: [id], onDelete: Cascade)
+
+  @@index([category])
+  @@map("payment_failures")
+}
+
+/// Recovery-worthiness assessment for a payment event.
+/// Stores whether recovery is recommended and the estimated recoverable amount.
+/// Predicted/estimated values — NOT actual outcomes.
+model RecoveryAssessment {
+  id                       String             @id @default(cuid())
+  paymentEventId           String             @unique @map("payment_event_id")
+  worthiness               RecoveryWorthiness
+  estimatedRecoverableAmount Decimal?         @db.Decimal(12, 2) @map("estimated_recoverable_amount")
+  confidence               Float?
+  reasoning                String?
+  assessedAt               DateTime           @default(now()) @map("assessed_at")
+  createdAt                DateTime           @default(now()) @map("created_at")
+
+  paymentEvent PaymentEvent @relation(fields: [paymentEventId], references: [id], onDelete: Restrict)
+
+  @@map("recovery_assessments")
+}
+
+/// A recommended recovery action for a payment event.
+model RecoveryRecommendation {
+  id             String               @id @default(cuid())
+  paymentEventId String               @unique @map("payment_event_id")
+  action         String
+  status         RecommendationStatus @default(PENDING)
+  reason         String?
+  confidence     Float?
+  createdAt      DateTime             @default(now()) @map("created_at")
+
+  paymentEvent PaymentEvent @relation(fields: [paymentEventId], references: [id], onDelete: Restrict)
+
+  @@map("recovery_recommendations")
+}
+
+/// Tracks the lifecycle of a recovery attempt.
+model RecoveryAttempt {
+  id             String                @id @default(cuid())
+  paymentEventId String                @map("payment_event_id")
+  status         RecoveryAttemptStatus @default(NOT_ATTEMPTED)
+  attemptedAt    DateTime?             @map("attempted_at")
+  completedAt    DateTime?             @map("completed_at")
+  createdAt      DateTime              @default(now()) @map("created_at")
+  updatedAt      DateTime              @updatedAt @map("updated_at")
+
+  paymentEvent PaymentEvent     @relation(fields: [paymentEventId], references: [id], onDelete: Restrict)
+  outcome      RecoveryOutcome?
+
+  @@index([paymentEventId])
+  @@index([status])
+  @@map("recovery_attempts")
+}
+
+/// Actual recovery result — separate from predictions/recommendations.
+/// The distinction between estimated and actual values is critical.
+model RecoveryOutcome {
+  id                    String                @id @default(cuid())
+  recoveryAttemptId     String                @unique @map("recovery_attempt_id")
+  paymentEventId        String                @map("payment_event_id")
+  outcome               RecoveryAttemptStatus
+  actualRecoveredAmount Decimal?              @db.Decimal(12, 2) @map("actual_recovered_amount")
+  outcomeTimestamp      DateTime              @map("outcome_timestamp")
+  notes                 String?
+  createdAt             DateTime              @default(now()) @map("created_at")
+
+  recoveryAttempt RecoveryAttempt @relation(fields: [recoveryAttemptId], references: [id], onDelete: Restrict)
+
+  @@index([paymentEventId])
+  @@index([outcome])
+  @@map("recovery_outcomes")
+}
+
+/// Persistence for ML model predictions — separate from deterministic assessments.
+model MlPrediction {
+  id             String       @id @default(cuid())
+  paymentEventId String       @map("payment_event_id")
+  modelVersion   String       @map("model_version")
+  prediction     Json
+  confidence     Float?
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  paymentEvent PaymentEvent @relation(fields: [paymentEventId], references: [id], onDelete: Restrict)
+
+  @@index([paymentEventId])
+  @@index([modelVersion])
+  @@map("ml_predictions")
 }
