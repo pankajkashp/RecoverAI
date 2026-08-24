@@ -11,6 +11,13 @@ describe("Phase 3 — Ingestion REST API (POST /api/payment-events)", () => {
 
   afterAll(async () => {
     // Cleanup test records
+    await prisma.recoveryAssessment.deleteMany({
+      where: {
+        paymentEvent: {
+          externalPaymentId: { startsWith: "pay_api_test_" },
+        },
+      },
+    });
     await prisma.paymentFailure.deleteMany({
       where: {
         paymentEvent: {

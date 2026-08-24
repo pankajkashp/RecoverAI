@@ -1,12 +1,14 @@
 /**
  * RecoverAI — Payment Pipeline Service
  *
- * Phase 3: Payment Event Pipeline
+ * Phase 3, 4 & 5: Payment Event Pipeline, Automatic Failure Analysis & Recovery Intelligence
  *
  * Core service responsible for:
  * 1. Validating CanonicalPaymentEvents.
  * 2. Enforcing idempotency (preventing duplicate events from creating duplicate business records).
- * 3. Persisting payment events and failure records in PostgreSQL.
+ * 3. Automatically triggering Failure Analysis for failed payments.
+ * 4. Automatically generating Recovery Assessments (worthiness & estimated recoverable amount).
+ * 5. Persisting payment events, failure records, and recovery assessments in PostgreSQL.
  *
  * Strictly provider-agnostic. Operates only on CanonicalPaymentEvents.
  */
@@ -16,16 +18,21 @@ import {
   CanonicalPaymentEvent,
   CanonicalPaymentEventSchema,
   PaymentPipelineResult,
-  FailureCategory,
 } from "@recoverai/contracts";
 import { prisma as defaultPrisma } from "../lib/prisma.js";
+import { FailureAnalysisService } from "./failure-analysis.service.js";
+import { RecoveryIntelligenceService } from "./recovery-intelligence.service.js";
 
 export class PaymentPipelineService {
-  constructor(private readonly db: PrismaClient = defaultPrisma) {}
+  constructor(
+    private readonly db: PrismaClient = defaultPrisma,
+    private readonly failureAnalysisService: FailureAnalysisService = new FailureAnalysisService(),
+    private readonly recoveryIntelligenceService: RecoveryIntelligenceService = new RecoveryIntelligenceService()
+  ) {}
 
   /**
    * Processes an incoming canonical payment event through validation,
-   * idempotency check, and persistence.
+   * idempotency check, automatic failure analysis, recovery intelligence assessment, and persistence.
    */
   async processEvent(
     rawCanonicalEvent: unknown
@@ -43,6 +50,10 @@ export class PaymentPipelineService {
           companyId: event.companyId,
         },
       },
+      include: {
+        failure: true,
+        assessment: true,
+      },
     });
 
     if (existing) {
@@ -57,6 +68,25 @@ export class PaymentPipelineService {
         currency: existing.currency,
         paymentStatus: existing.status,
         message: "Duplicate payment event detected. Existing record preserved (idempotent).",
+        failureAnalysis: existing.failure
+          ? {
+              category: existing.failure.category,
+              reason: existing.failure.failureMessage || "No reason recorded",
+              classification: "UNKNOWN",
+              isTemporary: null,
+            }
+          : undefined,
+        recoveryAssessment: existing.assessment
+          ? {
+              worthiness: existing.assessment.worthiness,
+              estimatedRecoverableAmount: (
+                existing.assessment.estimatedRecoverableAmount ?? 0
+              ).toString(),
+              confidence: existing.assessment.confidence,
+              reasoning:
+                existing.assessment.reasoning || "No reasoning recorded",
+            }
+          : undefined,
       };
     }
 
@@ -79,7 +109,21 @@ export class PaymentPipelineService {
       throw error;
     }
 
-    // 4. Persist Payment Event (with transaction for failure record if FAILED)
+    // 4. Automatic Failure Analysis & Recovery Intelligence (for failed payments)
+    const isFailed = event.status === "FAILED";
+    const failureAnalysis = isFailed
+      ? this.failureAnalysisService.analyzeFailure(event)
+      : null;
+
+    const recoveryAssessment =
+      isFailed && failureAnalysis
+        ? this.recoveryIntelligenceService.assessRecovery(
+            event,
+            failureAnalysis
+          )
+        : null;
+
+    // 5. Persist Payment Event, PaymentFailure, and RecoveryAssessment in a Transaction
     try {
       const created = await this.db.$transaction(async (tx) => {
         const paymentRecord = await tx.paymentEvent.create({
@@ -93,28 +137,42 @@ export class PaymentPipelineService {
             status: event.status,
             paymentMethod: event.paymentMethod,
             eventType: event.eventType,
-            failureCode: event.failureCode || null,
-            failureMessage: event.failureMessage || null,
+            failureCode: failureAnalysis
+              ? failureAnalysis.originalFailureCode || event.failureCode || null
+              : event.failureCode || null,
+            failureMessage: failureAnalysis
+              ? failureAnalysis.reason
+              : event.failureMessage || null,
             eventTimestamp: new Date(event.eventTimestamp),
             metadata: event.metadata ? (event.metadata as Prisma.InputJsonValue) : Prisma.JsonNull,
           },
         });
 
-        // If payment failed and failure info exists, persist normalized PaymentFailure record
-        if (
-          event.status === "FAILED" &&
-          (event.failureCode || event.failureMessage || event.failureCategory)
-        ) {
-          const category: FailureCategory =
-            event.failureCategory || "UNKNOWN";
-
+        // Persist normalized PaymentFailure record when payment is failed
+        if (failureAnalysis) {
           await tx.paymentFailure.create({
             data: {
               paymentEventId: paymentRecord.id,
-              category,
-              failureCode: event.failureCode || null,
-              failureMessage: event.failureMessage || null,
+              category: failureAnalysis.category,
+              failureCode: failureAnalysis.originalFailureCode || event.failureCode || null,
+              failureMessage: failureAnalysis.reason,
               failedAt: new Date(event.eventTimestamp),
+            },
+          });
+        }
+
+        // Persist RecoveryAssessment record when payment is failed
+        if (recoveryAssessment) {
+          await tx.recoveryAssessment.create({
+            data: {
+              paymentEventId: paymentRecord.id,
+              worthiness: recoveryAssessment.worthiness,
+              estimatedRecoverableAmount: new Prisma.Decimal(
+                recoveryAssessment.estimatedRecoverableAmount
+              ),
+              confidence: recoveryAssessment.confidence,
+              reasoning: recoveryAssessment.reasoning,
+              assessedAt: recoveryAssessment.assessedAt,
             },
           });
         }
@@ -133,6 +191,23 @@ export class PaymentPipelineService {
         currency: created.currency,
         paymentStatus: created.status,
         message: "Canonical payment event successfully validated and persisted.",
+        failureAnalysis: failureAnalysis
+          ? {
+              category: failureAnalysis.category,
+              reason: failureAnalysis.reason,
+              classification: failureAnalysis.classification,
+              isTemporary: failureAnalysis.isTemporary,
+            }
+          : undefined,
+        recoveryAssessment: recoveryAssessment
+          ? {
+              worthiness: recoveryAssessment.worthiness,
+              estimatedRecoverableAmount:
+                recoveryAssessment.estimatedRecoverableAmount.toString(),
+              confidence: recoveryAssessment.confidence,
+              reasoning: recoveryAssessment.reasoning,
+            }
+          : undefined,
       };
     } catch (err: unknown) {
       // Safe race-condition idempotency handler: if concurrent duplicate triggered P2002
@@ -148,6 +223,10 @@ export class PaymentPipelineService {
               companyId: event.companyId,
             },
           },
+          include: {
+            failure: true,
+            assessment: true,
+          },
         });
 
         if (duplicate) {
@@ -162,6 +241,25 @@ export class PaymentPipelineService {
             currency: duplicate.currency,
             paymentStatus: duplicate.status,
             message: "Concurrent duplicate payment event detected. Existing record preserved.",
+            failureAnalysis: duplicate.failure
+              ? {
+                  category: duplicate.failure.category,
+                  reason: duplicate.failure.failureMessage || "No reason recorded",
+                  classification: "UNKNOWN",
+                  isTemporary: null,
+                }
+              : undefined,
+            recoveryAssessment: duplicate.assessment
+              ? {
+                  worthiness: duplicate.assessment.worthiness,
+                  estimatedRecoverableAmount: (
+                    duplicate.assessment.estimatedRecoverableAmount ?? 0
+                  ).toString(),
+                  confidence: duplicate.assessment.confidence,
+                  reasoning:
+                    duplicate.assessment.reasoning || "No reasoning recorded",
+                }
+              : undefined,
           };
         }
       }

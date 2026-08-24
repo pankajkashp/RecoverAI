@@ -11,6 +11,13 @@ describe("Phase 3 — PaymentPipelineService", () => {
 
   afterAll(async () => {
     // Cleanup records created during pipeline tests
+    await prisma.recoveryAssessment.deleteMany({
+      where: {
+        paymentEvent: {
+          externalPaymentId: { startsWith: "pay_pipeline_test_" },
+        },
+      },
+    });
     await prisma.paymentFailure.deleteMany({
       where: {
         paymentEvent: {

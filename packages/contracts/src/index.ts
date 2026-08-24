@@ -66,6 +66,20 @@ export const FailureCategoryEnum = z.enum([
 ]);
 export type FailureCategory = z.infer<typeof FailureCategoryEnum>;
 
+export const FailureClassificationEnum = z.enum([
+  "TEMPORARY",
+  "PERMANENT",
+  "UNKNOWN",
+]);
+export type FailureClassification = z.infer<typeof FailureClassificationEnum>;
+
+export const RecoveryWorthinessEnum = z.enum([
+  "RECOVER",
+  "DO_NOT_RECOVER",
+  "REVIEW",
+]);
+export type RecoveryWorthiness = z.infer<typeof RecoveryWorthinessEnum>;
+
 // ============================================================================
 // Canonical Payment Event Schema & Types
 // ============================================================================
@@ -162,6 +176,40 @@ export const CanonicalPaymentEventSchema = z.object({
 export type CanonicalPaymentEvent = z.infer<typeof CanonicalPaymentEventSchema>;
 
 // ============================================================================
+// Failure Analysis Result Contract
+// ============================================================================
+
+export const FailureAnalysisResultSchema = z.object({
+  category: FailureCategoryEnum,
+  reason: z.string().min(1, "reason must not be empty"),
+  classification: FailureClassificationEnum,
+  isTemporary: z.boolean().nullable(),
+  originalFailureCode: z.string().nullable(),
+  originalFailureMessage: z.string().nullable(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
+
+export type FailureAnalysisResult = z.infer<typeof FailureAnalysisResultSchema>;
+
+// ============================================================================
+// Recovery Assessment Result Contract
+// ============================================================================
+
+export const RecoveryAssessmentResultSchema = z.object({
+  worthiness: RecoveryWorthinessEnum,
+  estimatedRecoverableAmount: z.number().nonnegative(),
+  originalAmount: z.number().positive(),
+  confidence: z.number().min(0).max(1).nullable(),
+  reasoning: z.string().min(1, "reasoning must not be empty"),
+  ruleId: z.string().default("deterministic-v1"),
+  assessedAt: z.coerce.date(),
+});
+
+export type RecoveryAssessmentResult = z.infer<
+  typeof RecoveryAssessmentResultSchema
+>;
+
+// ============================================================================
 // Provider Adapter Interface Boundary
 // ============================================================================
 
@@ -194,4 +242,16 @@ export interface PaymentPipelineResult {
   currency: string;
   paymentStatus: PaymentStatus;
   message: string;
+  failureAnalysis?: {
+    category: FailureCategory;
+    reason: string;
+    classification: FailureClassification;
+    isTemporary: boolean | null;
+  };
+  recoveryAssessment?: {
+    worthiness: RecoveryWorthiness;
+    estimatedRecoverableAmount: string;
+    confidence: number | null;
+    reasoning: string;
+  };
 }
