@@ -178,6 +178,9 @@ export class PaymentPipelineService {
         }
 
         return paymentRecord;
+      }, {
+        timeout: 30000,
+        maxWait: 15000,
       });
 
       return {

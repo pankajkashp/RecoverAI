@@ -1,0 +1,55 @@
+{
+  "model_version": "recovery_success_v1",
+  "evaluation_dataset": "synthetic_payment_recovery_dataset",
+  "is_synthetic_development_evaluation": true,
+  "validation_metrics": {
+    "accuracy": 0.692,
+    "precision": 0.6992,
+    "recall": 0.8962,
+    "f1_score": 0.7855,
+    "roc_auc": 0.6954,
+    "confusion_matrix": {
+      "true_negatives": 96,
+      "false_positives": 182,
+      "false_negatives": 49,
+      "true_positives": 423
+    },
+    "support": {
+      "total": 750,
+      "positive_cases": 472,
+      "negative_cases": 278
+    }
+  },
+  "test_metrics": {
+    "accuracy": 0.716,
+    "precision": 0.7143,
+    "recall": 0.913,
+    "f1_score": 0.8015,
+    "roc_auc": 0.6859,
+    "confusion_matrix": {
+      "true_negatives": 107,
+      "false_positives": 172,
+      "false_negatives": 41,
+      "true_positives": 430
+    },
+    "support": {
+      "total": 750,
+      "positive_cases": 471,
+      "negative_cases": 279
+    }
+  },
+  "precision_recall_tradeoff_analysis": {
+    "business_impact": "In payment recovery, False Positives trigger automated retries on unrecoverable payments (incurring gateway retry fees or customer friction), whereas False Negatives miss potentially recoverable revenue.",
+    "recommendation": "For initial development, balanced F1 / ROC-AUC is prioritized. When migrating to production with real provider retry fees, the decision threshold can be tuned based on unit economics."
+  },
+  "baseline_comparison": {
+    "deterministic_phase5_rules": "Deterministic rules map INSUFFICIENT_FUNDS/NETWORK/PROVIDER -> RECOVER, CARD -> DO_NOT_RECOVER, and AUTHENTICATION/UNKNOWN -> REVIEW.",
+    "ml_baseline_behavior": "Logistic Regression learns smooth continuous probabilities across combinations of amount, hour, category, and payment method without hardcoded thresholding.",
+    "status": "Phase 5 rules remain authoritative for production payment pipeline. ML model serves as independent shadow/experimental baseline."
+  },
+  "limitations": [
+    "Trained and evaluated exclusively on synthetic data with modeled distributions.",
+    "Does not reflect real-world seasonal shifts, provider latency spikes, or real customer repayment behavior.",
+    "Must be re-evaluated on historical production logs prior to any production decision-making."
+  ]
+}

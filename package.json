@@ -17,6 +17,8 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "test:ml": "PYTHONPATH=. .venv/bin/pytest tests/ml",
+    "dev:ml": "PYTHONPATH=. .venv/bin/uvicorn app.ml_service.main:app --port 8000 --reload",
     "prisma:generate": "prisma generate --schema=database/prisma/schema.prisma",
     "prisma:migrate": "prisma migrate dev --schema=database/prisma/schema.prisma",
     "prisma:deploy": "prisma migrate deploy --schema=database/prisma/schema.prisma",

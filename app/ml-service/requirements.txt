@@ -1,9 +1,11 @@
 # RecoverAI ML Service — Python dependencies
-# These are declared for future phases. No ML logic is implemented in Phase 1.
 
 fastapi>=0.115.0
 uvicorn>=0.34.0
 pandas>=2.2.0
 numpy>=2.1.0
 scikit-learn>=1.6.0
+joblib>=1.4.0
+pydantic>=2.10.0
 pytest>=8.3.0
+httpx>=0.28.0
