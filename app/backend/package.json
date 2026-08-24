@@ -13,6 +13,9 @@
   },
   "dependencies": {
     "@prisma/client": "^6.15.0",
+    "@recoverai/contracts": "*",
+    "@recoverai/integrations": "*",
+    "@recoverai/shared": "*",
     "cors": "^2.8.5",
     "dotenv": "^17.2.1",
     "express": "^5.1.0",

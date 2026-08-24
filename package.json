@@ -7,7 +7,8 @@
     "app/backend",
     "packages/shared",
     "packages/contracts",
-    "packages/config"
+    "packages/config",
+    "integrations"
   ],
   "scripts": {
     "dev:frontend": "npm --workspace app/frontend run dev",
