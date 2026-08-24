@@ -1,0 +1,20 @@
+{
+  "name": "recoverai",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "app/frontend",
+    "app/backend",
+    "packages/shared",
+    "packages/contracts",
+    "packages/config"
+  ],
+  "scripts": {
+    "dev:frontend": "npm --workspace app/frontend run dev",
+    "dev:backend": "npm --workspace app/backend run dev",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  }
+}

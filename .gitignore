@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# Build output
+.next/
+dist/
+out/
+build/
+
+# Test coverage
+coverage/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+.pytest_cache/
+.venv/
+*.pyc
+*.egg-info/
+
+# ML artifacts
+ml/models/*.pkl
+ml/models/*.joblib
+ml/models/*.h5
+
+# IDE
+.vscode/
+.idea/
+
+# Prisma
+database/prisma/*.db
