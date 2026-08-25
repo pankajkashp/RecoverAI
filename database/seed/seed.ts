@@ -18,6 +18,7 @@
  * - ML prediction records
  */
 
+import dotenv from "dotenv";
 import {
   PrismaClient,
   UserRole,
@@ -31,6 +32,8 @@ import {
   RecoveryAttemptStatus,
   Prisma,
 } from "@prisma/client";
+
+dotenv.config();
 
 const prisma = new PrismaClient();
 

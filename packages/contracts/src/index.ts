@@ -107,6 +107,7 @@ export const RecommendationStatusEnum = z.enum([
   "ACCEPTED",
   "REJECTED",
   "EXECUTED",
+  "EXPIRED",
   "SUPERSEDED",
 ]);
 export type RecommendationStatus = z.infer<typeof RecommendationStatusEnum>;
@@ -458,4 +459,168 @@ export interface RecoveryExecutionPipelineResult {
   isDemoSandbox: boolean;
   message: string;
 }
+
+// ============================================================================
+// Phase 9: Dashboard & Read API Contracts
+// ============================================================================
+
+/**
+ * Failure category aggregate count.
+ */
+export const FailureBreakdownItemSchema = z.object({
+  category: FailureCategoryEnum,
+  count: z.number().int().nonnegative(),
+  percentage: z.number().min(0).max(100),
+});
+export type FailureBreakdownItem = z.infer<typeof FailureBreakdownItemSchema>;
+
+/**
+ * Recovery lifecycle state aggregate count.
+ */
+export const RecoveryBreakdownItemSchema = z.object({
+  status: z.string(),
+  count: z.number().int().nonnegative(),
+  percentage: z.number().min(0).max(100),
+});
+export type RecoveryBreakdownItem = z.infer<typeof RecoveryBreakdownItemSchema>;
+
+/**
+ * Dashboard Summary API response payload.
+ */
+export const DashboardSummaryResponseSchema = z.object({
+  company: z.object({
+    id: z.string(),
+    name: z.string(),
+  }),
+  currency: z.string().min(3).max(3),
+  isDemo: z.boolean().default(true),
+  metrics: z.object({
+    totalPayments: z.number().int().nonnegative(),
+    failedPayments: z.number().int().nonnegative(),
+    successfulPayments: z.number().int().nonnegative(),
+    failureRate: z.number().min(0).max(100),
+    totalPaymentValue: z.string(),
+    potentiallyRecoverableAmount: z.string(),
+    estimatedRecoverableAmount: z.string(),
+    actualRecoveredAmount: z.string(),
+    recoveryRate: z.number().min(0).max(100),
+    recommendedCount: z.number().int().nonnegative(),
+    attemptedCount: z.number().int().nonnegative(),
+    successfulRecoveryCount: z.number().int().nonnegative(),
+  }),
+  failureBreakdown: z.array(FailureBreakdownItemSchema),
+  recoveryBreakdown: z.array(RecoveryBreakdownItemSchema),
+});
+export type DashboardSummaryResponse = z.infer<
+  typeof DashboardSummaryResponseSchema
+>;
+
+/**
+ * Query parameters for Dashboard Payments List API.
+ */
+export const DashboardPaymentsQuerySchema = z.object({
+  companyId: z.string().trim().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(10),
+  status: PaymentStatusEnum.optional(),
+  failureCategory: FailureCategoryEnum.optional(),
+  recoveryWorthiness: RecoveryWorthinessEnum.optional(),
+  recommendationAction: z.string().optional(),
+  recoveryStatus: RecoveryAttemptStatusEnum.optional(),
+  sortBy: z
+    .enum(["eventTimestamp", "amount", "createdAt"])
+    .default("eventTimestamp"),
+  sortOrder: z.enum(["asc", "desc"]).default("desc"),
+  search: z.string().trim().optional(),
+});
+export type DashboardPaymentsQuery = z.input<
+  typeof DashboardPaymentsQuerySchema
+>;
+export type DashboardPaymentsQueryOutput = z.infer<
+  typeof DashboardPaymentsQuerySchema
+>;
+
+/**
+ * Detailed lifecycle item representing a single payment event on the dashboard.
+ */
+export const PaymentLifecycleItemSchema = z.object({
+  id: z.string(),
+  externalPaymentId: z.string(),
+  companyId: z.string(),
+  providerId: z.string(),
+  providerType: ProviderTypeEnum,
+  customerReference: z.string().nullable(),
+  amount: z.string(),
+  currency: z.string(),
+  status: PaymentStatusEnum,
+  paymentMethod: PaymentMethodEnum,
+  eventType: EventTypeEnum,
+  failureCode: z.string().nullable(),
+  failureMessage: z.string().nullable(),
+  eventTimestamp: z.string(),
+  createdAt: z.string(),
+  isDemoSandbox: z.boolean(),
+  failure: z
+    .object({
+      category: FailureCategoryEnum,
+      failureCode: z.string().nullable(),
+      failureMessage: z.string().nullable(),
+      failedAt: z.string(),
+    })
+    .nullable(),
+  assessment: z
+    .object({
+      worthiness: RecoveryWorthinessEnum,
+      estimatedRecoverableAmount: z.string().nullable(),
+      confidence: z.number().nullable(),
+      reasoning: z.string().nullable(),
+      assessedAt: z.string(),
+    })
+    .nullable(),
+  recommendation: z
+    .object({
+      action: z.string(),
+      status: RecommendationStatusEnum,
+      reason: z.string().nullable(),
+      confidence: z.number().nullable(),
+      createdAt: z.string(),
+    })
+    .nullable(),
+  latestAttempt: z
+    .object({
+      id: z.string(),
+      status: RecoveryAttemptStatusEnum,
+      attemptedAt: z.string().nullable(),
+      completedAt: z.string().nullable(),
+    })
+    .nullable(),
+  latestOutcome: z
+    .object({
+      id: z.string(),
+      outcome: RecoveryAttemptStatusEnum,
+      actualRecoveredAmount: z.string().nullable(),
+      outcomeTimestamp: z.string().nullable(),
+      notes: z.string().nullable(),
+    })
+    .nullable(),
+});
+export type PaymentLifecycleItem = z.infer<typeof PaymentLifecycleItemSchema>;
+
+/**
+ * Dashboard Payments API response payload.
+ */
+export const DashboardPaymentsResponseSchema = z.object({
+  items: z.array(PaymentLifecycleItemSchema),
+  pagination: z.object({
+    page: z.number().int().positive(),
+    pageSize: z.number().int().positive(),
+    total: z.number().int().nonnegative(),
+    totalPages: z.number().int().nonnegative(),
+  }),
+  isDemo: z.boolean().default(true),
+});
+export type DashboardPaymentsResponse = z.infer<
+  typeof DashboardPaymentsResponseSchema
+>;
+
 

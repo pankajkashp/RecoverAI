@@ -11,6 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@recoverai/contracts": "*",
     "@recoverai/shared": "*",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
