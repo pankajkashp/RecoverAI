@@ -2,6 +2,7 @@ import cors from "cors";
 import express, { type ErrorRequestHandler } from "express";
 import { environment } from "./config/env.js";
 import { createPaymentEventRouter } from "./routes/payment-event.routes.js";
+import { createRecoveryAttemptRouter } from "./routes/recovery-attempt.routes.js";
 
 export function createApp() {
   const app = express();
@@ -16,6 +17,9 @@ export function createApp() {
 
   // Phase 3: Payment Event Ingestion Pipeline API
   app.use("/api/payment-events", createPaymentEventRouter());
+
+  // Phase 8: Recovery Execution & Outcome Tracking API
+  app.use("/api/recovery-attempts", createRecoveryAttemptRouter());
 
   // Centralized Error Handler (safe production responses, no credential leaks)
   const errorHandler: ErrorRequestHandler = (

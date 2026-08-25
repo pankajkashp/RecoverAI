@@ -106,6 +106,7 @@ export const RecommendationStatusEnum = z.enum([
   "PENDING",
   "ACCEPTED",
   "REJECTED",
+  "EXECUTED",
   "SUPERSEDED",
 ]);
 export type RecommendationStatus = z.infer<typeof RecommendationStatusEnum>;
@@ -339,3 +340,122 @@ export interface PaymentPipelineResult {
     mlProbability: number | null;
   };
 }
+
+// ============================================================================
+// Phase 8: Recovery Execution & Outcome Tracking Contracts
+// ============================================================================
+
+/**
+ * Status of a recovery attempt / outcome.
+ * Matches the Prisma schema RecoveryAttemptStatus enum.
+ */
+export const RecoveryAttemptStatusEnum = z.enum([
+  "NOT_ATTEMPTED",
+  "RECOMMENDED",
+  "ATTEMPTED",
+  "SUCCESSFUL",
+  "FAILED",
+  "CANCELLED",
+  "EXPIRED",
+  "UNKNOWN",
+]);
+export type RecoveryAttemptStatus = z.infer<typeof RecoveryAttemptStatusEnum>;
+
+/**
+ * Request payload for triggering recovery execution.
+ */
+export const RecoveryExecutionRequestSchema = z
+  .object({
+    /** Target recommendation ID (optional if paymentEventId is given). */
+    recommendationId: z.string().trim().min(1).optional(),
+
+    /** Target payment event ID (optional if recommendationId is given). */
+    paymentEventId: z.string().trim().min(1).optional(),
+
+    /** Optional parameter for deterministic simulation in test/sandbox environments. */
+    forceSimulationOutcome: RecoveryAttemptStatusEnum.optional(),
+  })
+  .refine((data) => Boolean(data.recommendationId || data.paymentEventId), {
+    message: "Either recommendationId or paymentEventId must be provided",
+    path: ["paymentEventId"],
+  });
+
+export type RecoveryExecutionRequest = z.infer<
+  typeof RecoveryExecutionRequestSchema
+>;
+
+/**
+ * Normalized result from a recovery provider adapter execution.
+ */
+export const RecoveryExecutionResultSchema = z.object({
+  /** Simulated or actual outcome status. */
+  status: RecoveryAttemptStatusEnum,
+
+  /** Whether the recovery attempt succeeded in recovering funds. */
+  isSuccess: z.boolean(),
+
+  /** Actual amount recovered (null if failed or cancelled). */
+  actualRecoveredAmount: z.number().nonnegative().nullable(),
+
+  /** ISO currency code. */
+  currency: z.string().min(3).max(3),
+
+  /** Provider type executing the recovery (DEMO for Phase 8). */
+  providerType: ProviderTypeEnum,
+
+  /** Flag clearly indicating demo/sandbox execution. */
+  isDemoSandbox: z.boolean().default(true),
+
+  /** Provider/adapter attempt reference identifier. */
+  attemptReference: z.string().min(1),
+
+  /** Timestamp when outcome was produced. */
+  outcomeTimestamp: z.coerce.date(),
+
+  /** Human-readable notes or error explanation from execution. */
+  notes: z.string().nullable(),
+
+  /** Provider metadata or raw response if available. */
+  rawResponse: z.record(z.string(), z.unknown()).optional(),
+});
+
+export type RecoveryExecutionResult = z.infer<
+  typeof RecoveryExecutionResultSchema
+>;
+
+/**
+ * Provider-independent recovery adapter boundary interface.
+ * Any recovery provider (Demo, Razorpay, Stripe) must implement this interface.
+ */
+export interface IRecoveryProviderAdapter {
+  readonly providerType: ProviderType;
+
+  /**
+   * Executes a recovery attempt for an eligible payment and recommendation.
+   */
+  executeRecovery(
+    event: CanonicalPaymentEvent,
+    recommendation: RecoveryRecommendationResult,
+    options?: { forceOutcome?: RecoveryAttemptStatus }
+  ): Promise<RecoveryExecutionResult>;
+}
+
+/**
+ * Pipeline result returned by the RecoveryExecutionService.
+ */
+export interface RecoveryExecutionPipelineResult {
+  status: "EXECUTED" | "ALREADY_EXECUTED" | "BLOCKED";
+  isExecuted: boolean;
+  recoveryAttemptId?: string;
+  recoveryOutcomeId?: string;
+  paymentEventId: string;
+  recommendationId: string;
+  recommendationAction: RecoveryAction;
+  attemptStatus: RecoveryAttemptStatus;
+  outcomeStatus: RecoveryAttemptStatus;
+  actualRecoveredAmount: string | null;
+  estimatedRecoverableAmount: string | null;
+  isDemoSandbox: boolean;
+  message: string;
+}
+

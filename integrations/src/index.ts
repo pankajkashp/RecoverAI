@@ -6,4 +6,5 @@
  */
 
 export * from "./demo/demo-adapter.js";
+export * from "./demo/demo-recovery-adapter.js";
 export * from "./providers/provider-registry.js";
