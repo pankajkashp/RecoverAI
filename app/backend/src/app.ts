@@ -1,6 +1,12 @@
 import cors from "cors";
-import express, { type ErrorRequestHandler } from "express";
+import express from "express";
 import { environment } from "./config/env.js";
+import { securityHeadersMiddleware } from "./middleware/security-headers.middleware.js";
+import { requestCorrelationMiddleware } from "./middleware/request-correlation.middleware.js";
+import { tenantContextMiddleware } from "./middleware/tenant-context.middleware.js";
+import { createRateLimiter } from "./middleware/rate-limiter.middleware.js";
+import { errorHandlerMiddleware } from "./middleware/error-handler.middleware.js";
+import { createHealthRouter } from "./routes/health.routes.js";
 import { createPaymentEventRouter } from "./routes/payment-event.routes.js";
 import { createRecoveryAttemptRouter } from "./routes/recovery-attempt.routes.js";
 import { createDashboardRouter } from "./routes/dashboard.routes.js";
@@ -8,34 +14,55 @@ import { createDashboardRouter } from "./routes/dashboard.routes.js";
 export function createApp() {
   const app = express();
 
-  app.use(cors({ origin: environment.FRONTEND_URL }));
-  app.use(express.json());
+  // 1. Security Headers & Server Hardening
+  app.use(securityHeadersMiddleware);
 
-  // Health check endpoint
-  app.get("/health", (_request, response) => {
-    response.json({ status: "ok" });
-  });
+  // 2. Request Correlation & Structured Logging
+  app.use(requestCorrelationMiddleware);
 
-  // Phase 3: Payment Event Ingestion Pipeline API
-  app.use("/api/payment-events", createPaymentEventRouter());
+  // 3. Strict CORS Origin Policy
+  app.use(
+    cors({
+      origin: environment.ALLOWED_ORIGINS,
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      allowedHeaders: [
+        "Content-Type",
+        "Authorization",
+        "X-Request-ID",
+        "X-Test-Rate-Limit",
+      ],
+      exposedHeaders: ["X-Request-ID", "Retry-After"],
+      credentials: true,
+    })
+  );
 
-  // Phase 8: Recovery Execution & Outcome Tracking API
-  app.use("/api/recovery-attempts", createRecoveryAttemptRouter());
+  // 4. Payload Size Limit Protection
+  app.use(express.json({ limit: "1mb" }));
 
-  // Phase 9: Dashboard & Read API
+  // 5. Health & Readiness Probes (Unauthenticated, fast liveness)
+  app.use("/", createHealthRouter());
+
+  // 6. Tenant Context & Multi-Tenant Isolation
+  app.use(tenantContextMiddleware);
+
+  // 7. Rate-Limiting Protection for High-Impact Endpoints
+  const mutationRateLimiter = createRateLimiter();
+
+  // 8. API Routes
+  app.use(
+    "/api/payment-events",
+    mutationRateLimiter,
+    createPaymentEventRouter()
+  );
+  app.use(
+    "/api/recovery-attempts",
+    mutationRateLimiter,
+    createRecoveryAttemptRouter()
+  );
   app.use("/api/dashboard", createDashboardRouter());
 
-  // Centralized Error Handler (safe production responses, no credential leaks)
-  const errorHandler: ErrorRequestHandler = (
-    error,
-    _request,
-    response,
-    _next
-  ) => {
-    console.error("Internal Server Error:", error);
-    response.status(500).json({ error: "Internal server error" });
-  };
-  app.use(errorHandler);
+  // 9. Centralized Error Handler (No stack traces or secrets leaked)
+  app.use(errorHandlerMiddleware);
 
   return app;
 }

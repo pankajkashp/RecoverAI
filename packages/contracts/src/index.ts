@@ -500,8 +500,22 @@ export const DashboardSummaryResponseSchema = z.object({
     successfulPayments: z.number().int().nonnegative(),
     failureRate: z.number().min(0).max(100),
     totalPaymentValue: z.string(),
+    /**
+     * Potentially Recoverable:
+     * Qualified opportunity volume — sum of original payment amounts (`PaymentEvent.amount`)
+     * for failed payments evaluated as high-confidence recovery targets (`assessment.worthiness == 'RECOVER'`).
+     */
     potentiallyRecoverableAmount: z.string(),
+    /**
+     * Estimated Recovery:
+     * Total intelligence forecast — sum of all assessment estimates (`RecoveryAssessment.estimatedRecoverableAmount`),
+     * including both `RECOVER` targets and payments currently under `REVIEW`.
+     */
     estimatedRecoverableAmount: z.string(),
+    /**
+     * Actually Recovered:
+     * Confirmed realized recovered funds from executed recovery attempts (`RecoveryOutcome.actualRecoveredAmount`).
+     */
     actualRecoveredAmount: z.string(),
     recoveryRate: z.number().min(0).max(100),
     recommendedCount: z.number().int().nonnegative(),

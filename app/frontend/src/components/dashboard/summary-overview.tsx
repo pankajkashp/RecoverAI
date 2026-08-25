@@ -40,8 +40,8 @@ export function SummaryOverview({ summary }: SummaryOverviewProps) {
         value={metrics.potentiallyRecoverableAmount}
         isCurrency={true}
         currency={currency}
-        subtitle="Identified from recoverable failures"
-        badgeText="Worthiness: RECOVER"
+        subtitle="High-confidence target pool (RECOVER)"
+        badgeText="Target Pool"
         badgeVariant="info"
         icon={
           <svg
@@ -66,8 +66,8 @@ export function SummaryOverview({ summary }: SummaryOverviewProps) {
         value={metrics.estimatedRecoverableAmount}
         isCurrency={true}
         currency={currency}
-        subtitle={`${metrics.recommendedCount} actions recommended`}
-        badgeText="Predicted Pipeline"
+        subtitle={`Total forecast (${metrics.recommendedCount} recommendations)`}
+        badgeText="Forecast (Incl. Review)"
         badgeVariant="default"
         icon={
           <svg
