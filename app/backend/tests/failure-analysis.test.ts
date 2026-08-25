@@ -141,6 +141,14 @@ describe("Phase 4 — Automatic Failure Analysis Service", () => {
     const testPrefix = `pay_p4_test_${Date.now()}`;
 
     afterAll(async () => {
+      // FK-safe cleanup: recommendation → assessment → failure → event
+      await prisma.recoveryRecommendation.deleteMany({
+        where: {
+          paymentEvent: {
+            externalPaymentId: { startsWith: testPrefix },
+          },
+        },
+      });
       await prisma.recoveryAssessment.deleteMany({
         where: {
           paymentEvent: {

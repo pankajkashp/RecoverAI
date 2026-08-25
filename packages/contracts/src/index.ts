@@ -80,6 +80,36 @@ export const RecoveryWorthinessEnum = z.enum([
 ]);
 export type RecoveryWorthiness = z.infer<typeof RecoveryWorthinessEnum>;
 
+/**
+ * The set of recovery actions that RecoverAI can recommend.
+ * These are recommendations only — NOT execution instructions.
+ * Actual execution belongs to Phase 8.
+ */
+export const RecoveryActionEnum = z.enum([
+  /** Retry the payment automatically or after a short delay. */
+  "RETRY_PAYMENT",
+  /** The customer must take an action (e.g. complete authentication or update card). */
+  "CUSTOMER_ACTION_REQUIRED",
+  /** Manual review is required before deciding a recovery path. */
+  "REVIEW",
+  /** Recovery is not worthwhile; do not attempt. */
+  "DO_NOT_RECOVER",
+]);
+export type RecoveryAction = z.infer<typeof RecoveryActionEnum>;
+
+/**
+ * Lifecycle status of a recovery recommendation.
+ * RECOMMENDED is the initial status when the engine creates a recommendation.
+ */
+export const RecommendationStatusEnum = z.enum([
+  "RECOMMENDED",
+  "PENDING",
+  "ACCEPTED",
+  "REJECTED",
+  "SUPERSEDED",
+]);
+export type RecommendationStatus = z.infer<typeof RecommendationStatusEnum>;
+
 // ============================================================================
 // Canonical Payment Event Schema & Types
 // ============================================================================
@@ -210,6 +240,50 @@ export type RecoveryAssessmentResult = z.infer<
 >;
 
 // ============================================================================
+// Recovery Recommendation Result Contract (Phase 7)
+// ============================================================================
+
+export const RecoveryRecommendationResultSchema = z.object({
+  /** The recommended recovery action. */
+  action: RecoveryActionEnum,
+
+  /** Initial lifecycle status of this recommendation. */
+  status: RecommendationStatusEnum.default("RECOMMENDED"),
+
+  /** Human-readable explanation of why this action was recommended. */
+  reason: z.string().min(1, "reason must not be empty"),
+
+  /**
+   * Confidence score [0..1] in the recommendation.
+   * Derived from deterministic rules and optionally adjusted by ML signal.
+   */
+  confidence: z.number().min(0).max(1).nullable(),
+
+  /**
+   * Source of the recommendation rule.
+   * 'deterministic-rules-v1' if no ML signal was used.
+   * 'deterministic-rules-v1+ml-signal-v1' if ML signal influenced the result.
+   */
+  ruleSource: z.string().default("deterministic-rules-v1"),
+
+  /** Whether an ML prediction was used as a supporting signal. */
+  mlUsed: z.boolean().default(false),
+
+  /**
+   * ML recovery probability (0..1) if ML was called and returned a valid response.
+   * Null if ML was not called or was unavailable.
+   */
+  mlProbability: z.number().min(0).max(1).nullable().default(null),
+
+  /** Timestamp when this recommendation was generated. */
+  recommendedAt: z.coerce.date(),
+});
+
+export type RecoveryRecommendationResult = z.infer<
+  typeof RecoveryRecommendationResultSchema
+>;
+
+// ============================================================================
 // Provider Adapter Interface Boundary
 // ============================================================================
 
@@ -253,5 +327,15 @@ export interface PaymentPipelineResult {
     estimatedRecoverableAmount: string;
     confidence: number | null;
     reasoning: string;
+  };
+  /** Phase 7: Recovery recommendation generated automatically for failed payments. */
+  recoveryRecommendation?: {
+    action: RecoveryAction;
+    status: RecommendationStatus;
+    reason: string;
+    confidence: number | null;
+    ruleSource: string;
+    mlUsed: boolean;
+    mlProbability: number | null;
   };
 }

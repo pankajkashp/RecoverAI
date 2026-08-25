@@ -1,14 +1,16 @@
 /**
  * RecoverAI — Payment Pipeline Service
  *
- * Phase 3, 4 & 5: Payment Event Pipeline, Automatic Failure Analysis & Recovery Intelligence
+ * Phase 3, 4, 5 & 7: Payment Event Pipeline, Automatic Failure Analysis,
+ * Recovery Intelligence & Recovery Recommendation
  *
  * Core service responsible for:
  * 1. Validating CanonicalPaymentEvents.
  * 2. Enforcing idempotency (preventing duplicate events from creating duplicate business records).
  * 3. Automatically triggering Failure Analysis for failed payments.
  * 4. Automatically generating Recovery Assessments (worthiness & estimated recoverable amount).
- * 5. Persisting payment events, failure records, and recovery assessments in PostgreSQL.
+ * 5. Automatically generating Recovery Recommendations (Phase 7).
+ * 6. Persisting payment events, failure records, recovery assessments, and recommendations in PostgreSQL.
  *
  * Strictly provider-agnostic. Operates only on CanonicalPaymentEvents.
  */
@@ -22,12 +24,14 @@ import {
 import { prisma as defaultPrisma } from "../lib/prisma.js";
 import { FailureAnalysisService } from "./failure-analysis.service.js";
 import { RecoveryIntelligenceService } from "./recovery-intelligence.service.js";
+import { RecoveryRecommendationService } from "./recovery-recommendation.service.js";
 
 export class PaymentPipelineService {
   constructor(
     private readonly db: PrismaClient = defaultPrisma,
     private readonly failureAnalysisService: FailureAnalysisService = new FailureAnalysisService(),
-    private readonly recoveryIntelligenceService: RecoveryIntelligenceService = new RecoveryIntelligenceService()
+    private readonly recoveryIntelligenceService: RecoveryIntelligenceService = new RecoveryIntelligenceService(),
+    private readonly recoveryRecommendationService: RecoveryRecommendationService = new RecoveryRecommendationService()
   ) {}
 
   /**
@@ -57,6 +61,11 @@ export class PaymentPipelineService {
     });
 
     if (existing) {
+      // Fetch recommendation for duplicate response
+      const existingRec = await this.db.recoveryRecommendation.findUnique({
+        where: { paymentEventId: existing.id },
+      });
+
       return {
         status: "DUPLICATE",
         isDuplicate: true,
@@ -87,6 +96,17 @@ export class PaymentPipelineService {
                 existing.assessment.reasoning || "No reasoning recorded",
             }
           : undefined,
+        recoveryRecommendation: existingRec
+          ? {
+              action: existingRec.action as import("@recoverai/contracts").RecoveryAction,
+              status: existingRec.status as import("@recoverai/contracts").RecommendationStatus,
+              reason: existingRec.reason || "No reason recorded",
+              confidence: existingRec.confidence,
+              ruleSource: "deterministic-rules-v1",
+              mlUsed: false,
+              mlProbability: null,
+            }
+          : undefined,
       };
     }
 
@@ -109,7 +129,7 @@ export class PaymentPipelineService {
       throw error;
     }
 
-    // 4. Automatic Failure Analysis & Recovery Intelligence (for failed payments)
+    // 4. Automatic Failure Analysis, Recovery Intelligence & Recommendation (for failed payments)
     const isFailed = event.status === "FAILED";
     const failureAnalysis = isFailed
       ? this.failureAnalysisService.analyzeFailure(event)
@@ -120,6 +140,16 @@ export class PaymentPipelineService {
         ? this.recoveryIntelligenceService.assessRecovery(
             event,
             failureAnalysis
+          )
+        : null;
+
+    // Phase 7: Generate recommendation (async; uses ML service with timeout fallback)
+    const recommendation =
+      isFailed && failureAnalysis && recoveryAssessment
+        ? await this.recoveryRecommendationService.recommend(
+            event,
+            failureAnalysis,
+            recoveryAssessment
           )
         : null;
 
@@ -177,6 +207,22 @@ export class PaymentPipelineService {
           });
         }
 
+        // Phase 7: Persist RecoveryRecommendation record
+        if (recommendation) {
+          await tx.recoveryRecommendation.create({
+            data: {
+              paymentEventId: paymentRecord.id,
+              action: recommendation.action,
+              // Cast status string to Prisma enum type.
+              // The recommendation service always produces 'RECOMMENDED' as initial status.
+              // Full lifecycle transitions (ACCEPTED, REJECTED, etc.) belong to Phase 8.
+              status: recommendation.status as import("@prisma/client").RecommendationStatus,
+              reason: recommendation.reason,
+              confidence: recommendation.confidence,
+            },
+          });
+        }
+
         return paymentRecord;
       }, {
         timeout: 30000,
@@ -211,6 +257,17 @@ export class PaymentPipelineService {
               reasoning: recoveryAssessment.reasoning,
             }
           : undefined,
+        recoveryRecommendation: recommendation
+          ? {
+              action: recommendation.action,
+              status: recommendation.status,
+              reason: recommendation.reason,
+              confidence: recommendation.confidence,
+              ruleSource: recommendation.ruleSource,
+              mlUsed: recommendation.mlUsed,
+              mlProbability: recommendation.mlProbability,
+            }
+          : undefined,
       };
     } catch (err: unknown) {
       // Safe race-condition idempotency handler: if concurrent duplicate triggered P2002
@@ -229,6 +286,7 @@ export class PaymentPipelineService {
           include: {
             failure: true,
             assessment: true,
+            recommendation: true,
           },
         });
 
@@ -261,6 +319,17 @@ export class PaymentPipelineService {
                   confidence: duplicate.assessment.confidence,
                   reasoning:
                     duplicate.assessment.reasoning || "No reasoning recorded",
+                }
+              : undefined,
+            recoveryRecommendation: duplicate.recommendation
+              ? {
+                  action: duplicate.recommendation.action as import("@recoverai/contracts").RecoveryAction,
+                  status: duplicate.recommendation.status as import("@recoverai/contracts").RecommendationStatus,
+                  reason: duplicate.recommendation.reason || "No reason recorded",
+                  confidence: duplicate.recommendation.confidence,
+                  ruleSource: "deterministic-rules-v1",
+                  mlUsed: false,
+                  mlProbability: null,
                 }
               : undefined,
           };

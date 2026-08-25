@@ -83,6 +83,7 @@ enum RecoveryWorthiness {
 }
 
 enum RecommendationStatus {
+  RECOMMENDED
   PENDING
   ACCEPTED
   REJECTED
@@ -227,7 +228,7 @@ model RecoveryRecommendation {
   id             String               @id @default(cuid())
   paymentEventId String               @unique @map("payment_event_id")
   action         String
-  status         RecommendationStatus @default(PENDING)
+  status         RecommendationStatus @default(RECOMMENDED)
   reason         String?
   confidence     Float?
   createdAt      DateTime             @default(now()) @map("created_at")

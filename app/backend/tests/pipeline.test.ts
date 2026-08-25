@@ -10,7 +10,14 @@ describe("Phase 3 — PaymentPipelineService", () => {
   const testExternalId = `pay_pipeline_test_${Date.now()}`;
 
   afterAll(async () => {
-    // Cleanup records created during pipeline tests
+    // Cleanup records in FK-safe order: recommendation → assessment → failure → event
+    await prisma.recoveryRecommendation.deleteMany({
+      where: {
+        paymentEvent: {
+          externalPaymentId: { startsWith: "pay_pipeline_test_" },
+        },
+      },
+    });
     await prisma.recoveryAssessment.deleteMany({
       where: {
         paymentEvent: {

@@ -10,7 +10,15 @@ describe("Phase 3 — Ingestion REST API (POST /api/payment-events)", () => {
   const testExternalId = `pay_api_test_${Date.now()}`;
 
   afterAll(async () => {
-    // Cleanup test records
+    // Cleanup test records in FK-safe order:
+    // recommendation → assessment → failure → event
+    await prisma.recoveryRecommendation.deleteMany({
+      where: {
+        paymentEvent: {
+          externalPaymentId: { startsWith: "pay_api_test_" },
+        },
+      },
+    });
     await prisma.recoveryAssessment.deleteMany({
       where: {
         paymentEvent: {

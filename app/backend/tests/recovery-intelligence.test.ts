@@ -120,7 +120,15 @@ describe("Phase 5 — Recovery Intelligence Service", () => {
     const testPrefix = `pay_p5_test_${Date.now()}`;
 
     afterAll(async () => {
-      // Clean up test records
+      // Clean up test records in FK-safe order:
+      // recommendation → assessment → failure → event
+      await prisma.recoveryRecommendation.deleteMany({
+        where: {
+          paymentEvent: {
+            externalPaymentId: { startsWith: testPrefix },
+          },
+        },
+      });
       await prisma.recoveryAssessment.deleteMany({
         where: {
           paymentEvent: {
