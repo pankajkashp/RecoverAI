@@ -7,4 +7,7 @@
 
 export * from "./demo/demo-adapter.js";
 export * from "./demo/demo-recovery-adapter.js";
+export * from "./razorpay/razorpay-schemas.js";
+export * from "./razorpay/razorpay-adapter.js";
+export * from "./razorpay/razorpay-recovery-adapter.js";
 export * from "./providers/provider-registry.js";

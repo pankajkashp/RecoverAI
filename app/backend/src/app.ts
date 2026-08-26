@@ -10,6 +10,7 @@ import { createHealthRouter } from "./routes/health.routes.js";
 import { createPaymentEventRouter } from "./routes/payment-event.routes.js";
 import { createRecoveryAttemptRouter } from "./routes/recovery-attempt.routes.js";
 import { createDashboardRouter } from "./routes/dashboard.routes.js";
+import { createWebhookRouter } from "./routes/webhook.routes.js";
 
 export function createApp() {
   const app = express();
@@ -36,8 +37,15 @@ export function createApp() {
     })
   );
 
-  // 4. Payload Size Limit Protection
-  app.use(express.json({ limit: "1mb" }));
+  // 4. Payload Size Limit Protection with Raw Body Capture for Signature Verification
+  app.use(
+    express.json({
+      limit: "1mb",
+      verify: (req: express.Request, _res: express.Response, buf: Buffer) => {
+        req.rawBody = buf;
+      },
+    })
+  );
 
   // 5. Health & Readiness Probes (Unauthenticated, fast liveness)
   app.use("/", createHealthRouter());
@@ -60,6 +68,7 @@ export function createApp() {
     createRecoveryAttemptRouter()
   );
   app.use("/api/dashboard", createDashboardRouter());
+  app.use("/api/webhooks", mutationRateLimiter, createWebhookRouter());
 
   // 9. Centralized Error Handler (No stack traces or secrets leaked)
   app.use(errorHandlerMiddleware);

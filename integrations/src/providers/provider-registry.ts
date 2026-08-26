@@ -9,6 +9,7 @@
 
 import { IProviderAdapter, ProviderType } from "@recoverai/contracts";
 import { DemoAdapter } from "../demo/demo-adapter.js";
+import { RazorpayProviderAdapter } from "../razorpay/razorpay-adapter.js";
 
 export class ProviderRegistry {
   private static instance: ProviderRegistry;
@@ -17,6 +18,7 @@ export class ProviderRegistry {
   private constructor() {
     // Automatically register default built-in adapters
     this.register(new DemoAdapter());
+    this.register(new RazorpayProviderAdapter());
   }
 
   public static getInstance(): ProviderRegistry {

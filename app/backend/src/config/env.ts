@@ -30,6 +30,10 @@ const environmentSchema = z.object({
   AUTH_SECRET: z.string().min(1).optional(),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60000),
   RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().positive().default(100),
+  // Razorpay Test Mode Configuration (Optional — required only for live sandbox webhooks)
+  RAZORPAY_KEY_ID: z.string().min(1).optional(),
+  RAZORPAY_KEY_SECRET: z.string().min(1).optional(),
+  RAZORPAY_WEBHOOK_SECRET: z.string().min(1).optional(),
 });
 
 export const environment = environmentSchema.parse(process.env);
