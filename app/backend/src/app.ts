@@ -7,10 +7,12 @@ import { tenantContextMiddleware } from "./middleware/tenant-context.middleware.
 import { createRateLimiter } from "./middleware/rate-limiter.middleware.js";
 import { errorHandlerMiddleware } from "./middleware/error-handler.middleware.js";
 import { createHealthRouter } from "./routes/health.routes.js";
+import { createAuthRouter } from "./routes/auth.routes.js";
 import { createPaymentEventRouter } from "./routes/payment-event.routes.js";
 import { createRecoveryAttemptRouter } from "./routes/recovery-attempt.routes.js";
 import { createDashboardRouter } from "./routes/dashboard.routes.js";
 import { createWebhookRouter } from "./routes/webhook.routes.js";
+import { requireRole } from "./middleware/role-authorization.middleware.js";
 
 export function createApp() {
   const app = express();
@@ -57,6 +59,7 @@ export function createApp() {
   const mutationRateLimiter = createRateLimiter();
 
   // 8. API Routes
+  app.use("/api/auth", createAuthRouter());
   app.use(
     "/api/payment-events",
     mutationRateLimiter,
@@ -65,6 +68,7 @@ export function createApp() {
   app.use(
     "/api/recovery-attempts",
     mutationRateLimiter,
+    requireRole(["ADMIN", "MEMBER"]),
     createRecoveryAttemptRouter()
   );
   app.use("/api/dashboard", createDashboardRouter());

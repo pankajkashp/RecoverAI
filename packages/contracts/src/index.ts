@@ -637,4 +637,49 @@ export type DashboardPaymentsResponse = z.infer<
   typeof DashboardPaymentsResponseSchema
 >;
 
+// ============================================================================
+// Phase 12: Production Authentication, Authorization & User Contracts
+// ============================================================================
+
+/**
+ * User Role enum matching the Prisma database schema.
+ */
+export const UserRoleEnum = z.enum(["ADMIN", "MEMBER", "VIEWER"]);
+export type UserRole = z.infer<typeof UserRoleEnum>;
+
+/**
+ * Authenticated user profile contract.
+ */
+export const AuthUserSchema = z.object({
+  id: z.string().min(1),
+  email: z.string().email(),
+  name: z.string().min(1),
+  role: UserRoleEnum,
+  companyId: z.string().min(1),
+  createdAt: z.coerce.date().optional(),
+});
+export type AuthUser = z.infer<typeof AuthUserSchema>;
+
+/**
+ * Login request payload schema.
+ */
+export const LoginRequestSchema = z.object({
+  email: z.string().email("A valid email address is required"),
+  password: z.string().min(1, "Password is required").optional(),
+  demoToken: z.string().optional(),
+});
+export type LoginRequest = z.infer<typeof LoginRequestSchema>;
+
+/**
+ * Login response payload schema.
+ */
+export const LoginResponseSchema = z.object({
+  success: z.boolean(),
+  token: z.string().min(1),
+  user: AuthUserSchema,
+  expiresIn: z.number().positive(), // in seconds
+});
+export type LoginResponse = z.infer<typeof LoginResponseSchema>;
+
+
 

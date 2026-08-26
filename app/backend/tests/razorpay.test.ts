@@ -21,11 +21,13 @@ import {
   type RazorpayWebhookPayload,
 } from "@recoverai/integrations";
 import { createApp } from "../src/app.js";
+import { environment } from "../src/config/env.js";
 
 const prisma = new PrismaClient();
 const app = createApp();
 
-const TEST_WEBHOOK_SECRET = "test_webhook_secret_key";
+const TEST_WEBHOOK_SECRET =
+  environment.RAZORPAY_WEBHOOK_SECRET || "test_webhook_secret_key";
 
 function signPayload(payload: object, secret: string = TEST_WEBHOOK_SECRET): string {
   const jsonStr = JSON.stringify(payload);

@@ -8,12 +8,15 @@
  */
 
 import { type Request, type Response, type NextFunction } from "express";
+import { AuthUser, UserRole } from "@recoverai/contracts";
 import { environment } from "../config/env.js";
+import { AuthService } from "../services/auth.service.js";
+import { AuditService } from "../services/audit.service.js";
 
 export interface TenantContext {
   companyId: string;
   userId?: string;
-  role?: string;
+  role?: UserRole;
   isDemoSandbox: boolean;
   isAuthenticated: boolean;
 }
@@ -23,6 +26,7 @@ declare global {
   namespace Express {
     interface Request {
       tenant?: TenantContext;
+      user?: AuthUser;
     }
   }
   /* eslint-enable @typescript-eslint/no-namespace */
@@ -35,53 +39,69 @@ export class TenantIsolationError extends Error {
   }
 }
 
+const authService = new AuthService();
+const auditService = AuditService.getInstance();
+
 export function tenantContextMiddleware(
   req: Request,
   res: Response,
   next: NextFunction
 ): void {
-  // 1. Extract Authorization header if provided
+  // 1. Webhook Exception: Webhooks use cryptographic provider signatures (X-Razorpay-Signature)
+  if (req.path.startsWith("/api/webhooks")) {
+    next();
+    return;
+  }
+
+  // 2. Health & Readiness Exception
+  if (req.path === "/health" || req.path === "/ready" || req.path.startsWith("/api/health")) {
+    next();
+    return;
+  }
+
+  // 3. Auth Routes (login) do not require prior authentication
+  if (req.path === "/api/auth/login") {
+    next();
+    return;
+  }
+
+  // 4. Extract and Verify Authorization Bearer Header
   const authHeader = req.headers["authorization"];
-  let authenticatedCompanyId: string | null = null;
-  let authenticatedUserId: string | null = null;
-  let isAuthenticated = false;
+  let authUser: AuthUser | null = null;
 
   if (authHeader && authHeader.startsWith("Bearer ")) {
     const token = authHeader.substring(7).trim();
-    // Architectural boundary for JWT/token verification
-    // e.g. decode and verify token payload against AUTH_SECRET
     if (token.length > 0) {
-      try {
-        // Simple decoded payload extraction for valid tenant tokens
-        const parts = token.split(".");
-        if (parts.length === 3) {
-          const payload = JSON.parse(
-            Buffer.from(parts[1], "base64").toString("utf-8")
-          );
-          if (payload.companyId) {
-            authenticatedCompanyId = String(payload.companyId);
-            authenticatedUserId = payload.userId ? String(payload.userId) : null;
-            isAuthenticated = true;
-          }
-        } else if (token.startsWith("demo_token_")) {
-          authenticatedCompanyId = token.replace("demo_token_", "");
-          isAuthenticated = true;
-        }
-      } catch {
-        // invalid token structure
-      }
+      authUser = authService.verifyToken(token);
     }
   }
 
-  // 2. Identify target company from query or body
+  // 5. Identify target company from query or body
   const targetCompanyId =
     (typeof req.query.companyId === "string" && req.query.companyId.trim()) ||
     (typeof req.body?.companyId === "string" && req.body.companyId.trim()) ||
     null;
 
-  // 3. Strict Tenant Isolation Check
-  if (isAuthenticated && authenticatedCompanyId) {
-    if (targetCompanyId && targetCompanyId !== authenticatedCompanyId) {
+  // 6. Authenticated User Flow & Multi-Tenant Isolation
+  if (authUser) {
+    req.user = authUser;
+
+    // Strict Multi-Tenant Isolation Check: Reject cross-tenant spoofing attempts
+    if (targetCompanyId && targetCompanyId !== authUser.companyId) {
+      auditService.log({
+        userId: authUser.id,
+        companyId: authUser.companyId,
+        role: authUser.role,
+        action: "TENANT_ISOLATION_VIOLATION_ATTEMPT",
+        resource: req.originalUrl || req.path,
+        status: "DENIED",
+        requestId: req.id,
+        metadata: {
+          targetCompanyId,
+          authenticatedCompanyId: authUser.companyId,
+        },
+      });
+
       res.status(403).json({
         success: false,
         error: "Tenant isolation violation: cannot access another company's data",
@@ -91,8 +111,9 @@ export function tenantContextMiddleware(
     }
 
     req.tenant = {
-      companyId: authenticatedCompanyId,
-      userId: authenticatedUserId || undefined,
+      companyId: authUser.companyId,
+      userId: authUser.id,
+      role: authUser.role,
       isDemoSandbox: false,
       isAuthenticated: true,
     };
@@ -100,10 +121,17 @@ export function tenantContextMiddleware(
     return;
   }
 
-  // 4. Production requirement vs Demo/Sandbox Fallback
+  // 7. Production requirement vs Sandbox/Dev fallback
   if (environment.NODE_ENV === "production") {
     // In production, unauthenticated requests to protected APIs are rejected
-    if (req.path.startsWith("/api/") && !req.path.startsWith("/api/health")) {
+    if (req.path.startsWith("/api/")) {
+      auditService.log({
+        action: "UNAUTHENTICATED_ACCESS_BLOCKED",
+        resource: req.originalUrl || req.path,
+        status: "DENIED",
+        requestId: req.id,
+      });
+
       res.status(401).json({
         success: false,
         error: "Authentication required",
@@ -113,9 +141,10 @@ export function tenantContextMiddleware(
     }
   }
 
-  // 5. Development / Sandbox fallback context
+  // 8. Development / Sandbox fallback context
   req.tenant = {
     companyId: targetCompanyId || "demo_company_001",
+    role: "ADMIN",
     isDemoSandbox: true,
     isAuthenticated: false,
   };
