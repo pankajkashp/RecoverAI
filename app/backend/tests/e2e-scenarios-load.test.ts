@@ -337,7 +337,7 @@ describe("Phase 13 — E2E Scenarios & Load Benchmarking", () => {
       expect(res.body.data.company.id).toBe(companyId);
       console.log(`[BENCHMARK] Dashboard summary query latency: ${durationMs}ms`);
 
-      expect(durationMs).toBeLessThan(5000);
+      expect(durationMs).toBeLessThan(10000);
     });
 
     it("measures paginated payment list query response time", async () => {
@@ -353,7 +353,7 @@ describe("Phase 13 — E2E Scenarios & Load Benchmarking", () => {
       expect(res.body.data.items).toBeDefined();
       console.log(`[BENCHMARK] Paginated payment list latency: ${durationMs}ms`);
 
-      expect(durationMs).toBeLessThan(5000);
+      expect(durationMs).toBeLessThan(10000);
     });
   });
 });

@@ -183,6 +183,8 @@ model PaymentEvent {
   @@unique([providerId, externalPaymentId, companyId], name: "provider_external_company_unique")
   @@index([companyId])
   @@index([status])
+  @@index([companyId, status])
+  @@index([companyId, eventTimestamp])
   @@index([providerId])
   @@index([externalPaymentId])
   @@index([eventTimestamp])

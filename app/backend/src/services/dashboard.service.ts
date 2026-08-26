@@ -63,31 +63,41 @@ export class DashboardService {
   async getDashboardSummary(companyId?: string): Promise<DashboardSummaryResponse> {
     const company = await this.resolveCompany(companyId);
 
-    // 1. Fetch total counts and breakdown
-    const [totalPayments, failedPayments, successfulPayments] =
-      await Promise.all([
-        this.prisma.paymentEvent.count({
-          where: { companyId: company.id },
-        }),
-        this.prisma.paymentEvent.count({
-          where: { companyId: company.id, status: "FAILED" },
-        }),
-        this.prisma.paymentEvent.count({
-          where: { companyId: company.id, status: "COMPLETED" },
-        }),
-      ]);
-
-    // 2. Fetch monetary aggregates
+    // 1. Fetch all 14 summary metrics concurrently in a single Promise.all
     const [
+      totalPayments,
+      failedPayments,
+      successfulPayments,
       totalPaymentSum,
       potentiallyRecoverableSum,
       estimatedRecoverableSum,
       actualRecoveredSum,
+      recommendedCount,
+      attemptedCount,
+      successfulRecoveryCount,
+      failureGroups,
+      doNotRecoverCount,
+      reviewCount,
+      failedOutcomeCount,
     ] = await Promise.all([
+      // 1. Total payments count
+      this.prisma.paymentEvent.count({
+        where: { companyId: company.id },
+      }),
+      // 2. Failed payments count
+      this.prisma.paymentEvent.count({
+        where: { companyId: company.id, status: "FAILED" },
+      }),
+      // 3. Completed payments count
+      this.prisma.paymentEvent.count({
+        where: { companyId: company.id, status: "COMPLETED" },
+      }),
+      // 4. Total payments monetary sum
       this.prisma.paymentEvent.aggregate({
         where: { companyId: company.id },
         _sum: { amount: true },
       }),
+      // 5. Potentially recoverable sum (FAILED with worthiness RECOVER)
       this.prisma.paymentEvent.aggregate({
         where: {
           companyId: company.id,
@@ -96,45 +106,65 @@ export class DashboardService {
         },
         _sum: { amount: true },
       }),
+      // 6. Estimated recoverable sum
       this.prisma.recoveryAssessment.aggregate({
         where: {
           paymentEvent: { companyId: company.id },
         },
         _sum: { estimatedRecoverableAmount: true },
       }),
+      // 7. Actual recovered sum
       this.prisma.recoveryOutcome.aggregate({
         where: {
           recoveryAttempt: { paymentEvent: { companyId: company.id } },
         },
         _sum: { actualRecoveredAmount: true },
       }),
+      // 8. Recommended actions count
+      this.prisma.recoveryRecommendation.count({
+        where: { paymentEvent: { companyId: company.id } },
+      }),
+      // 9. Recovery attempts count
+      this.prisma.recoveryAttempt.count({
+        where: { paymentEvent: { companyId: company.id } },
+      }),
+      // 10. Successful recoveries count
+      this.prisma.recoveryOutcome.count({
+        where: {
+          recoveryAttempt: { paymentEvent: { companyId: company.id } },
+          outcome: "SUCCESSFUL",
+        },
+      }),
+      // 11. Failure breakdown by category
+      this.prisma.paymentFailure.groupBy({
+        by: ["category"],
+        where: {
+          paymentEvent: { companyId: company.id },
+        },
+        _count: { category: true },
+      }),
+      // 12. Do not recover assessments count
+      this.prisma.recoveryAssessment.count({
+        where: {
+          paymentEvent: { companyId: company.id },
+          worthiness: "DO_NOT_RECOVER",
+        },
+      }),
+      // 13. Review required assessments count
+      this.prisma.recoveryAssessment.count({
+        where: {
+          paymentEvent: { companyId: company.id },
+          worthiness: "REVIEW",
+        },
+      }),
+      // 14. Failed recovery outcomes count
+      this.prisma.recoveryOutcome.count({
+        where: {
+          recoveryAttempt: { paymentEvent: { companyId: company.id } },
+          outcome: "FAILED",
+        },
+      }),
     ]);
-
-    // 3. Counts for recommendation and execution lifecycle
-    const [recommendedCount, attemptedCount, successfulRecoveryCount] =
-      await Promise.all([
-        this.prisma.recoveryRecommendation.count({
-          where: { paymentEvent: { companyId: company.id } },
-        }),
-        this.prisma.recoveryAttempt.count({
-          where: { paymentEvent: { companyId: company.id } },
-        }),
-        this.prisma.recoveryOutcome.count({
-          where: {
-            recoveryAttempt: { paymentEvent: { companyId: company.id } },
-            outcome: "SUCCESSFUL",
-          },
-        }),
-      ]);
-
-    // 4. Failure breakdown by category
-    const failureGroups = await this.prisma.paymentFailure.groupBy({
-      by: ["category"],
-      where: {
-        paymentEvent: { companyId: company.id },
-      },
-      _count: { category: true },
-    });
 
     const failureBreakdown: FailureBreakdownItem[] = failureGroups.map((g) => {
       const count = g._count.category;
@@ -146,32 +176,6 @@ export class DashboardService {
         percentage,
       };
     });
-
-    // 5. Recovery lifecycle status breakdown
-    const [
-      doNotRecoverCount,
-      reviewCount,
-      failedOutcomeCount,
-    ] = await Promise.all([
-      this.prisma.recoveryAssessment.count({
-        where: {
-          paymentEvent: { companyId: company.id },
-          worthiness: "DO_NOT_RECOVER",
-        },
-      }),
-      this.prisma.recoveryAssessment.count({
-        where: {
-          paymentEvent: { companyId: company.id },
-          worthiness: "REVIEW",
-        },
-      }),
-      this.prisma.recoveryOutcome.count({
-        where: {
-          recoveryAttempt: { paymentEvent: { companyId: company.id } },
-          outcome: "FAILED",
-        },
-      }),
-    ]);
 
     const totalFailedOrAssessed = Math.max(failedPayments, 1);
     const recoveryBreakdown: RecoveryBreakdownItem[] = [
@@ -339,13 +343,66 @@ export class DashboardService {
         skip,
         take: pageSize,
         orderBy,
-        include: {
-          provider: true,
-          failure: true,
-          assessment: true,
-          recommendation: true,
+        select: {
+          id: true,
+          externalPaymentId: true,
+          companyId: true,
+          providerId: true,
+          customerReference: true,
+          amount: true,
+          currency: true,
+          status: true,
+          paymentMethod: true,
+          eventType: true,
+          failureCode: true,
+          failureMessage: true,
+          eventTimestamp: true,
+          createdAt: true,
+          provider: {
+            select: { type: true },
+          },
+          failure: {
+            select: {
+              category: true,
+              failureCode: true,
+              failureMessage: true,
+              failedAt: true,
+            },
+          },
+          assessment: {
+            select: {
+              worthiness: true,
+              estimatedRecoverableAmount: true,
+              confidence: true,
+              reasoning: true,
+              assessedAt: true,
+            },
+          },
+          recommendation: {
+            select: {
+              action: true,
+              status: true,
+              reason: true,
+              confidence: true,
+              createdAt: true,
+            },
+          },
           attempts: {
-            include: { outcome: true },
+            select: {
+              id: true,
+              status: true,
+              attemptedAt: true,
+              completedAt: true,
+              outcome: {
+                select: {
+                  id: true,
+                  outcome: true,
+                  actualRecoveredAmount: true,
+                  outcomeTimestamp: true,
+                  notes: true,
+                },
+              },
+            },
             orderBy: { createdAt: "desc" },
             take: 1,
           },
