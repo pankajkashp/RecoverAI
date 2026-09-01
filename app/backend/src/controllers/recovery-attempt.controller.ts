@@ -13,6 +13,7 @@ import {
   RecoveryExecutionService,
   IneligibleRecoveryError,
   RecommendationNotFoundError,
+  TenantIsolationError,
 } from "../services/recovery-execution.service.js";
 
 export class RecoveryAttemptController {
@@ -30,7 +31,8 @@ export class RecoveryAttemptController {
     next: NextFunction
   ): Promise<void> => {
     try {
-      const result = await this.executionService.executeRecovery(req.body);
+      const companyId = req.tenant?.companyId;
+      const result = await this.executionService.executeRecovery(req.body, companyId);
 
       // Return 200 for idempotent duplicate calls, 201 for new executions
       const statusCode = result.isExecuted ? 201 : 200;
@@ -48,6 +50,15 @@ export class RecoveryAttemptController {
             path: issue.path.join("."),
             message: issue.message,
           })),
+        });
+        return;
+      }
+
+      if (error instanceof TenantIsolationError) {
+        res.status(403).json({
+          success: false,
+          error: error.message,
+          code: error.code,
         });
         return;
       }
@@ -74,3 +85,4 @@ export class RecoveryAttemptController {
     }
   };
 }
+

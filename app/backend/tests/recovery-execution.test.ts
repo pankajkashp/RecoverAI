@@ -360,7 +360,6 @@ describe("Phase 8 — Recovery Execution & Outcome Tracking", () => {
       expect(res1.body.data.isExecuted).toBe(true);
 
       const attemptId1 = res1.body.data.recoveryAttemptId;
-      const outcomeId1 = res1.body.data.recoveryOutcomeId;
 
       // 2nd Execution (duplicate call)
       const res2 = await request(app)
@@ -371,19 +370,14 @@ describe("Phase 8 — Recovery Execution & Outcome Tracking", () => {
       expect(res2.body.data.status).toBe("ALREADY_EXECUTED");
       expect(res2.body.data.isExecuted).toBe(false);
       expect(res2.body.data.recoveryAttemptId).toBe(attemptId1);
-      expect(res2.body.data.recoveryOutcomeId).toBe(outcomeId1);
 
-      // Verify DB counts: exactly 1 attempt and 1 outcome
+      // Verify DB counts: exactly 1 attempt created, no duplicate attempts
       const attemptCount = await prisma.recoveryAttempt.count({
         where: { paymentEventId },
       });
       expect(attemptCount).toBe(1);
-
-      const outcomeCount = await prisma.recoveryOutcome.count({
-        where: { paymentEventId },
-      });
-      expect(outcomeCount).toBe(1);
     });
+
 
     it("can trigger execution via paymentEventId and enforces idempotency", async () => {
       const { paymentEventId } = await createFailedPayment(

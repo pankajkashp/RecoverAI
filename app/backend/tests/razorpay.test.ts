@@ -406,9 +406,20 @@ describe("Phase 11 — Razorpay Sandbox Integration", () => {
         recommendation
       );
 
-      expect(outcome.status).toBe("SUCCESSFUL");
-      expect(outcome.actualRecoveredAmount).toBe(3000.0);
-      expect(outcome.attemptReference).toContain("att_rzp_test_");
+      // Invariant: Initiating recovery returns ATTEMPTED, NOT recovered money
+      expect(outcome.status).toBe("ATTEMPTED");
+      expect(outcome.actualRecoveredAmount).toBeNull();
+      expect(outcome.attemptReference).toMatch(/plink_/);
+
+      // Simulation override can force outcome for specific test scenarios
+      const forcedOutcome = await recoveryAdapter.executeRecovery(
+        canonicalEvent,
+        recommendation,
+        { forceOutcome: "SUCCESSFUL" }
+      );
+      expect(forcedOutcome.status).toBe("SUCCESSFUL");
+      expect(forcedOutcome.actualRecoveredAmount).toBe(3000.0);
     });
   });
 });
+

@@ -458,7 +458,10 @@ export interface RecoveryExecutionPipelineResult {
   estimatedRecoverableAmount: string | null;
   isDemoSandbox: boolean;
   message: string;
+  checkoutUrl?: string | null;
+  providerReference?: string | null;
 }
+
 
 // ============================================================================
 // Phase 9: Dashboard & Read API Contracts

@@ -54,11 +54,11 @@ export class DemoRecoveryAdapter implements IRecoveryProviderAdapter {
     ) {
       status = (event.metadata as Record<string, unknown>).simulationOutcome as RecoveryAttemptStatus;
     } else {
-      // Default deterministic behavior:
-      // If recommendation is RETRY_PAYMENT and failure category is temporary, simulate SUCCESSFUL
-      // Otherwise provide a deterministic simulated outcome
-      status = "SUCCESSFUL";
+      // Default: recovery execution initiates attempt.
+      // ATTEMPTED != RECOVERED: actualRecoveredAmount is NOT credited until confirmed.
+      status = "ATTEMPTED";
     }
+
 
     // 2. Configure recovered amount and notes per outcome
     switch (status) {

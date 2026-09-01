@@ -242,21 +242,26 @@ model RecoveryRecommendation {
 
 /// Tracks the lifecycle of a recovery attempt.
 model RecoveryAttempt {
-  id             String                @id @default(cuid())
-  paymentEventId String                @map("payment_event_id")
-  status         RecoveryAttemptStatus @default(NOT_ATTEMPTED)
-  attemptedAt    DateTime?             @map("attempted_at")
-  completedAt    DateTime?             @map("completed_at")
-  createdAt      DateTime              @default(now()) @map("created_at")
-  updatedAt      DateTime              @updatedAt @map("updated_at")
+  id                String                @id @default(cuid())
+  paymentEventId    String                @map("payment_event_id")
+  status            RecoveryAttemptStatus @default(NOT_ATTEMPTED)
+  providerReference String?               @map("provider_reference")
+  checkoutUrl       String?               @map("checkout_url")
+  metadata          Json?
+  attemptedAt       DateTime?             @map("attempted_at")
+  completedAt       DateTime?             @map("completed_at")
+  createdAt         DateTime              @default(now()) @map("created_at")
+  updatedAt         DateTime              @updatedAt @map("updated_at")
 
   paymentEvent PaymentEvent     @relation(fields: [paymentEventId], references: [id], onDelete: Restrict)
   outcome      RecoveryOutcome?
 
   @@index([paymentEventId])
   @@index([status])
+  @@index([providerReference])
   @@map("recovery_attempts")
 }
+
 
 /// Actual recovery result — separate from predictions/recommendations.
 /// The distinction between estimated and actual values is critical.

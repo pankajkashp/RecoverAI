@@ -14,6 +14,7 @@ import crypto from "node:crypto";
 import { type Request, type Response, type NextFunction } from "express";
 import { RazorpayProviderAdapter } from "@recoverai/integrations";
 import { PaymentPipelineService } from "../services/payment-pipeline.service.js";
+import { RecoveryExecutionService } from "../services/recovery-execution.service.js";
 import { environment } from "../config/env.js";
 import { prisma } from "../lib/prisma.js";
 
@@ -31,10 +32,17 @@ declare global {
 export class RazorpayWebhookController {
   private readonly adapter = new RazorpayProviderAdapter();
   private readonly pipelineService: PaymentPipelineService;
+  private readonly recoveryExecutionService: RecoveryExecutionService;
 
-  constructor(pipelineService?: PaymentPipelineService) {
+  constructor(
+    pipelineService?: PaymentPipelineService,
+    recoveryExecutionService?: RecoveryExecutionService
+  ) {
     this.pipelineService = pipelineService || new PaymentPipelineService();
+    this.recoveryExecutionService =
+      recoveryExecutionService || new RecoveryExecutionService();
   }
+
 
   /**
    * Main webhook handler for POST /api/webhooks/razorpay
@@ -145,16 +153,50 @@ export class RazorpayWebhookController {
         });
       }
 
-      // 6. Normalize Razorpay Webhook Payload to CanonicalPaymentEvent
+      // 6. Check for Recovery Confirmation (e.g. payment.captured for a recovery attempt)
+      const paymentEntity = req.body?.payload?.payment?.entity;
+      const orderEntity = req.body?.payload?.order?.entity;
+      const paymentLinkEntity = req.body?.payload?.payment_link?.entity;
+      const notes = paymentEntity?.notes || orderEntity?.notes || paymentLinkEntity?.notes;
+      const eventName = req.body?.event as string;
+
+      const recoveryResult = await this.recoveryExecutionService.confirmRecoveryFromProvider({
+        companyId: company.id,
+        providerPaymentId: paymentEntity?.id || orderEntity?.id || paymentLinkEntity?.id || "unknown",
+        confirmedAmount: paymentEntity ? Number((paymentEntity.amount / 100).toFixed(2)) : 0,
+        currency: paymentEntity?.currency || "INR",
+        event: eventName,
+        recoveryAttemptId: notes?.recoveryAttemptId,
+        paymentEventId: notes?.paymentEventId,
+        originalExternalPaymentId: notes?.originalExternalPaymentId || notes?.originalPaymentId,
+        providerReference: paymentEntity?.order_id || paymentLinkEntity?.id || paymentEntity?.id,
+        notes: `Razorpay webhook: ${eventName} (${paymentEntity?.id || "N/A"})`,
+      });
+
+      if (recoveryResult.isRecovery) {
+        res.status(200).json({
+          success: true,
+          isRecoveryConfirmation: true,
+          recoveryAttemptId: recoveryResult.attemptId,
+          recoveryOutcomeId: recoveryResult.outcomeId,
+          outcomeStatus: recoveryResult.status,
+          actualRecoveredAmount: recoveryResult.actualRecoveredAmount,
+          message: recoveryResult.message,
+          requestId: req.id,
+        });
+        return;
+      }
+
+      // 7. Normalize Razorpay Webhook Payload to CanonicalPaymentEvent
       const canonicalEvent = this.adapter.normalize(req.body, {
         companyId: company.id,
         providerId: provider.id,
       });
 
-      // 7. Dispatch through Existing Core Payment Pipeline
+      // 8. Dispatch through Existing Core Payment Pipeline
       const result = await this.pipelineService.processEvent(canonicalEvent);
 
-      // 8. Return Safe Standardized Response
+      // 9. Return Safe Standardized Response
       res.status(200).json({
         success: true,
         eventId: result.paymentEventId,
@@ -168,3 +210,4 @@ export class RazorpayWebhookController {
     }
   };
 }
+

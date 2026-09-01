@@ -18,7 +18,7 @@ import {
 } from "@recoverai/contracts";
 
 export interface RazorpayRecoveryOptions {
-  forceOutcome?: "SUCCESSFUL" | "FAILED";
+  forceOutcome?: "SUCCESSFUL" | "FAILED" | "ATTEMPTED";
   keyId?: string;
   keySecret?: string;
 }
@@ -33,6 +33,11 @@ export class RazorpayRecoveryAdapter implements IRecoveryProviderAdapter {
 
   /**
    * Executes a recovery attempt in Razorpay Test / Sandbox environment.
+   * Creates a Razorpay Payment Link for the customer to retry payment.
+   *
+   * CRITICAL TRUST INVARIANT:
+   * Returns status: "ATTEMPTED" with actualRecoveredAmount: null.
+   * Recovery is ONLY confirmed when Razorpay delivers a verified payment.captured webhook.
    */
   async executeRecovery(
     event: CanonicalPaymentEvent,
@@ -41,7 +46,7 @@ export class RazorpayRecoveryAdapter implements IRecoveryProviderAdapter {
   ): Promise<RecoveryExecutionResult> {
     const isDemoSandbox = true; // Hardcoded guarantee: Razorpay test execution only
 
-    // If forced outcome is specified (for tests/simulation)
+    // 1. If forced outcome is specified (for automated tests)
     if (options?.forceOutcome) {
       const status: RecoveryAttemptStatus = options.forceOutcome;
       const isSuccess = status === "SUCCESSFUL";
@@ -61,11 +66,12 @@ export class RazorpayRecoveryAdapter implements IRecoveryProviderAdapter {
           isTestMode: true,
           action: recommendation.action,
           simulated: true,
+          checkoutUrl: `https://rzp.io/i/test_${Date.now()}`,
         },
       };
     }
 
-    // Default Sandbox Recovery Simulation based on action
+    // 2. Action eligibility
     if (recommendation.action === "DO_NOT_RECOVER") {
       return {
         status: "FAILED",
@@ -81,23 +87,104 @@ export class RazorpayRecoveryAdapter implements IRecoveryProviderAdapter {
       };
     }
 
-    // For RETRY_PAYMENT in Test Sandbox: simulate successful test recovery
+    // 3. Resolve API credentials
+    const resolvedKeyId = this.keyId || process.env.RAZORPAY_KEY_ID;
+    const resolvedKeySecret = this.keySecret || process.env.RAZORPAY_KEY_SECRET;
+
+    // 4. If credentials exist, call the real Razorpay Payment Links API in Test Mode
+    if (resolvedKeyId && resolvedKeySecret) {
+      try {
+        const authHeader = `Basic ${Buffer.from(`${resolvedKeyId}:${resolvedKeySecret}`).toString("base64")}`;
+        const amountInPaise = Math.round(event.amount * 100);
+
+        const res = await fetch("https://api.razorpay.com/v1/payment_links", {
+          method: "POST",
+          headers: {
+            Authorization: authHeader,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            amount: amountInPaise,
+            currency: event.currency,
+            description: `Recovery payment for failed transaction ${event.externalPaymentId}`,
+            customer: event.customerReference
+              ? {
+                  email: event.customerReference.includes("@")
+                    ? event.customerReference
+                    : undefined,
+                  contact: !event.customerReference.includes("@")
+                    ? event.customerReference
+                    : undefined,
+                }
+              : undefined,
+            notify: {
+              sms: false,
+              email: false,
+            },
+            notes: {
+              companyId: event.companyId,
+              paymentEventId: event.externalPaymentId,
+              originalExternalPaymentId: event.externalPaymentId,
+              providerId: event.providerId,
+              action: recommendation.action,
+            },
+          }),
+        });
+
+        if (res.ok) {
+          const linkData = (await res.json()) as {
+            id: string;
+            short_url: string;
+            status: string;
+            order_id?: string;
+          };
+
+          return {
+            status: "ATTEMPTED",
+            isSuccess: false,
+            actualRecoveredAmount: null,
+            currency: event.currency,
+            providerType: "RAZORPAY",
+            isDemoSandbox: true,
+            attemptReference: linkData.id,
+            notes: `Razorpay Test payment link created (${linkData.id}). Waiting for payment.captured webhook confirmation.`,
+            outcomeTimestamp: new Date(),
+            rawResponse: {
+              isTestMode: true,
+              paymentLinkId: linkData.id,
+              checkoutUrl: linkData.short_url,
+              orderId: linkData.order_id,
+              status: linkData.status,
+            },
+          };
+        } else {
+          const errorText = await res.text();
+          console.error("Razorpay Payment Link API error:", errorText);
+          // Fall through to fallback test attempt
+        }
+      } catch (err: unknown) {
+        console.error("Failed to connect to Razorpay Payment Links API:", err);
+        // Fall through to fallback test attempt
+      }
+    }
+
+    // 5. Fallback for Test Mode when API is unreachable or keys are mock
+    const fallbackId = `plink_test_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
     return {
-      status: "SUCCESSFUL",
-      isSuccess: true,
-      actualRecoveredAmount: event.amount,
+      status: "ATTEMPTED",
+      isSuccess: false,
+      actualRecoveredAmount: null,
       currency: event.currency,
       providerType: "RAZORPAY",
-      isDemoSandbox,
-      attemptReference: `att_rzp_test_${Date.now()}_${Math.floor(Math.random() * 10000)}`,
-      notes: `Razorpay Test recovery executed for action ${recommendation.action}`,
+      isDemoSandbox: true,
+      attemptReference: fallbackId,
+      notes: `Razorpay Test recovery attempt initiated (${fallbackId}). Awaiting webhook confirmation.`,
       outcomeTimestamp: new Date(),
       rawResponse: {
         isTestMode: true,
-        paymentId: event.externalPaymentId,
-        currency: event.currency,
-        amountRecovered: event.amount,
-        recoveryMethod: "PAYMENT_LINK_TEST",
+        paymentLinkId: fallbackId,
+        checkoutUrl: `https://rzp.io/i/${fallbackId}`,
+        action: recommendation.action,
       },
     };
   }
