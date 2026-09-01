@@ -140,7 +140,7 @@ export default function DashboardPage() {
       />
 
       {/* 2. Main Dashboard Content */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+      <main className="flex-1 max-w-[1440px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
         {/* Error Alert with Retry */}
         {error && (
           <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-xs text-rose-600 dark:text-rose-400 flex items-center justify-between gap-3">
@@ -206,14 +206,15 @@ export default function DashboardPage() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-border/80 bg-card/40 py-4 mt-auto text-center text-xs text-muted-foreground">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+      <footer className="border-t border-border bg-card/60 py-4 mt-auto text-xs text-muted-foreground">
+        <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2">
           <span>RecoverAI — Autonomous Payment Failure Recovery Platform</span>
-          <span className="font-mono text-[11px] text-muted-foreground/70">
-            Phase 9 Dashboard & Read API (Synthetic Demo Context)
+          <span className="font-mono text-[11px] text-muted-foreground/80">
+            Demo / Razorpay Test Mode (Synthetic Failure Simulations)
           </span>
         </div>
       </footer>
+
     </div>
   );
 }

@@ -1,86 +1,80 @@
 import React from "react";
+import { formatCurrency, formatNumber } from "@/lib/utils";
 
 interface KpiCardProps {
+  stageNumber?: string;
   title: string;
   value: string | number;
   subtitle?: string;
   badgeText?: string;
   badgeVariant?: "default" | "success" | "warning" | "danger" | "info";
-  icon?: React.ReactNode;
   isCurrency?: boolean;
   currency?: string;
 }
 
 export function KpiCard({
+  stageNumber,
   title,
   value,
   subtitle,
   badgeText,
   badgeVariant = "default",
-  icon,
   isCurrency = false,
   currency = "INR",
 }: KpiCardProps) {
   const badgeClasses = {
     default:
-      "bg-secondary text-secondary-foreground border-border",
+      "bg-muted text-muted-foreground border-border/80",
     success:
-      "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
+      "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 font-medium",
     warning:
-      "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
+      "bg-amber-500/10 text-amber-800 dark:text-amber-300 border-amber-500/30 font-medium",
     danger:
-      "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20",
-    info: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20",
+      "bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/30 font-medium",
+    info: "bg-sky-500/10 text-sky-800 dark:text-sky-300 border-sky-500/30 font-medium",
   };
 
-  const formattedValue =
-    typeof value === "number"
-      ? isCurrency
-        ? new Intl.NumberFormat("en-IN", {
-            style: "currency",
-            currency,
-            maximumFractionDigits: 0,
-          }).format(value)
-        : new Intl.NumberFormat("en-IN").format(value)
-      : isCurrency && !isNaN(Number(value))
-      ? new Intl.NumberFormat("en-IN", {
-          style: "currency",
-          currency,
-          maximumFractionDigits: 0,
-        }).format(Number(value))
-      : value;
+  const formattedValue = isCurrency
+    ? formatCurrency(value, currency)
+    : formatNumber(value);
 
   return (
-    <div className="rounded-xl border border-border/80 bg-card p-5 shadow-xs transition-all hover:shadow-md hover:border-border/90 flex flex-col justify-between group">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+    <div className="rounded-xl border border-border bg-card p-4.5 flex flex-col justify-between transition-colors shadow-2xs">
+      <div>
+        <div className="flex items-center justify-between gap-2">
+          {stageNumber && (
+            <span className="font-mono text-[10px] font-semibold text-muted-foreground/80 uppercase tracking-wider">
+              {stageNumber}
+            </span>
+          )}
+          {badgeText && (
+            <span
+              className={`inline-flex items-center rounded px-2 py-0.5 text-[11px] font-semibold tracking-wide border ${badgeClasses[badgeVariant]}`}
+            >
+              {badgeText}
+            </span>
+          )}
+        </div>
+
+        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mt-1.5">
           {title}
-        </span>
-        {icon && (
-          <div className="p-2 rounded-lg bg-muted/60 text-muted-foreground group-hover:text-foreground group-hover:bg-muted transition-colors">
-            {icon}
-          </div>
-        )}
+        </div>
       </div>
 
       <div className="mt-3">
-        <div className="text-2xl sm:text-3xl font-extrabold tracking-tight text-foreground">
+        <div className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground font-mono tabular-nums">
           {formattedValue}
         </div>
       </div>
 
-      <div className="mt-3 flex items-center justify-between gap-2 pt-2 border-t border-border/40">
+      <div className="mt-3 pt-2.5 border-t border-border/50">
         {subtitle && (
-          <span className="text-xs text-muted-foreground truncate">{subtitle}</span>
-        )}
-        {badgeText && (
-          <span
-            className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold tracking-wide ${badgeClasses[badgeVariant]}`}
-          >
-            {badgeText}
+          <span className="text-xs text-muted-foreground block truncate">
+            {subtitle}
           </span>
         )}
       </div>
     </div>
   );
 }
+

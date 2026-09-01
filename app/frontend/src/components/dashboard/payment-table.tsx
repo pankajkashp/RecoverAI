@@ -4,6 +4,7 @@ import {
   type DashboardPaymentsResponse,
 } from "@recoverai/contracts";
 import { PaymentDetailModal } from "./payment-detail-modal";
+import { formatCurrency } from "@/lib/utils";
 
 interface PaymentTableProps {
   data: DashboardPaymentsResponse | null;
@@ -16,40 +17,60 @@ interface PaymentTableProps {
   onRecoverySuccess?: () => void;
 }
 
-
 const statusBadgeClasses: Record<string, string> = {
   COMPLETED:
-    "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
-  FAILED: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20",
+    "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30",
+  FAILED: "bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/30",
   PENDING:
-    "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
+    "bg-amber-500/10 text-amber-800 dark:text-amber-300 border-amber-500/30",
   AUTHORIZED:
-    "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20",
+    "bg-sky-500/10 text-sky-700 dark:text-sky-300 border-sky-500/30",
   CANCELLED:
-    "bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20",
+    "bg-muted text-muted-foreground border-border",
   REFUNDED:
-    "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20",
+    "bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-500/30",
 };
 
 const worthinessBadgeClasses: Record<string, string> = {
   RECOVER:
-    "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20",
+    "bg-sky-500/10 text-sky-800 dark:text-sky-300 border-sky-500/30",
   REVIEW:
-    "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
+    "bg-amber-500/10 text-amber-800 dark:text-amber-300 border-amber-500/30",
   DO_NOT_RECOVER:
-    "bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20",
+    "bg-muted text-muted-foreground border-border",
 };
 
 const recoveryOutcomeBadgeClasses: Record<string, string> = {
   SUCCESSFUL:
-    "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
-  FAILED: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20",
+    "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30",
+  FAILED: "bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/30",
   ATTEMPTED:
-    "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20",
+    "bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border-indigo-500/30",
   RECOMMENDED:
-    "bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20",
+    "bg-slate-500/10 text-slate-700 dark:text-slate-300 border-slate-500/30",
   NOT_ATTEMPTED:
-    "bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20",
+    "bg-muted text-muted-foreground border-border",
+};
+
+const ACTION_LABELS: Record<string, string> = {
+  RETRY_PAYMENT: "Retry payment",
+  CUSTOMER_ACTION_REQUIRED: "Customer action required",
+  REVIEW: "Review required",
+  DO_NOT_RECOVER: "Do not recover",
+};
+
+const WORTHINESS_LABELS: Record<string, string> = {
+  RECOVER: "Recoverable",
+  REVIEW: "Review required",
+  DO_NOT_RECOVER: "Do not recover",
+};
+
+const RECOVERY_OUTCOME_LABELS: Record<string, string> = {
+  SUCCESSFUL: "Recovered",
+  FAILED: "Recovery failed",
+  ATTEMPTED: "Attempted",
+  RECOMMENDED: "Pending execution",
+  PENDING: "Processing",
 };
 
 export function PaymentTable({
@@ -70,63 +91,96 @@ export function PaymentTable({
   const pagination = data?.pagination;
 
   return (
-    <div className="rounded-xl border border-border/80 bg-card shadow-xs overflow-hidden flex flex-col">
+    <div className="rounded-xl border border-border bg-card shadow-2xs overflow-hidden">
       {/* Table Header Controls */}
-      <div className="p-4 border-b border-border/80 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+      <div className="p-4 border-b border-border/80 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h3 className="text-sm font-bold uppercase tracking-wider text-foreground">
-            Payment Recovery Lifecycle
-          </h3>
+          <h2 className="text-sm font-bold text-foreground tracking-tight">
+            Ingested Payment Events & Recovery Chain
+          </h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Full audit trail from ingestion through failure analysis to recovery outcome
+            Real-time canonical payment failure stream and automated recovery decisions
           </p>
         </div>
 
-        {pagination && (
-          <div className="text-xs text-muted-foreground">
-            Total: <span className="font-semibold text-foreground">{pagination.total}</span> events
-          </div>
-        )}
+        <div className="flex items-center gap-3 self-end sm:self-auto">
+          <span className="text-xs font-mono text-muted-foreground bg-muted px-2.5 py-1 rounded border border-border/60">
+            {pagination ? `${pagination.total} total events` : "0 total events"}
+          </span>
+        </div>
       </div>
 
       {/* Table Body */}
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
-            <tr className="border-b border-border/70 bg-muted/40 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+            <tr className="border-b border-border bg-muted/40 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {/* 1. Payment & Time */}
               <th
-                className="py-3 px-4 cursor-pointer hover:text-foreground select-none transition-colors"
+                scope="col"
+                aria-sort={
+                  sortBy === "eventTimestamp"
+                    ? sortOrder === "asc"
+                      ? "ascending"
+                      : "descending"
+                    : "none"
+                }
+                className="py-2.5 px-3 cursor-pointer hover:text-foreground select-none transition-colors w-[14%]"
                 onClick={() => onSortChange("eventTimestamp")}
               >
                 <div className="flex items-center gap-1">
                   <span>Payment / Time</span>
                   {sortBy === "eventTimestamp" && (
-                    <span>{sortOrder === "asc" ? "↑" : "↓"}</span>
+                    <span className="font-mono">{sortOrder === "asc" ? "↑" : "↓"}</span>
                   )}
                 </div>
               </th>
 
+              {/* 2. Amount */}
               <th
-                className="py-3 px-4 cursor-pointer hover:text-foreground select-none transition-colors"
+                scope="col"
+                aria-sort={
+                  sortBy === "amount"
+                    ? sortOrder === "asc"
+                      ? "ascending"
+                      : "descending"
+                    : "none"
+                }
+                className="py-2.5 px-3 text-right cursor-pointer hover:text-foreground select-none transition-colors w-[11%]"
                 onClick={() => onSortChange("amount")}
               >
-                <div className="flex items-center gap-1">
+                <div className="flex items-center justify-end gap-1">
                   <span>Amount</span>
                   {sortBy === "amount" && (
-                    <span>{sortOrder === "asc" ? "↑" : "↓"}</span>
+                    <span className="font-mono">{sortOrder === "asc" ? "↑" : "↓"}</span>
                   )}
                 </div>
               </th>
 
-              <th className="py-3 px-4">Status</th>
-              <th className="py-3 px-4">Failure Category & Reason</th>
-              <th className="py-3 px-4">Worthiness</th>
-              <th className="py-3 px-4">Estimated Recov.</th>
-              <th className="py-3 px-4">Recommended Action</th>
-              <th className="py-3 px-4">Recovery Status</th>
-              <th className="py-3 px-4">Actual Recov.</th>
-              <th className="py-3 px-4 text-center">Env</th>
-              <th className="py-3 px-4 text-right">Audit</th>
+              {/* 3. Status & Failure Reason */}
+              <th scope="col" className="py-2.5 px-3 w-[25%]">
+                Status & Root Cause
+              </th>
+
+              {/* 4. Recoverability */}
+              <th scope="col" className="py-2.5 px-3 w-[18%]">
+                Recoverability
+              </th>
+
+              {/* 5. Recommended Action */}
+              <th scope="col" className="py-2.5 px-3 w-[14%]">
+                Recommended Action
+              </th>
+
+              {/* 6. Recovery Result & Actual Recovered */}
+              <th scope="col" className="py-2.5 px-3 text-right w-[12%]">
+                Recovery Result
+              </th>
+
+              {/* 7. Action */}
+              <th scope="col" className="py-2.5 px-3 text-right w-[6%]">
+                Action
+              </th>
             </tr>
           </thead>
 
@@ -135,38 +189,29 @@ export function PaymentTable({
               // Loading Skeleton
               Array.from({ length: 5 }).map((_, index) => (
                 <tr key={`skeleton-${index}`} className="animate-pulse">
-                  <td className="py-3.5 px-4">
+                  <td className="py-3 px-3">
                     <div className="h-3.5 w-24 bg-muted rounded mb-1" />
                     <div className="h-2.5 w-16 bg-muted/60 rounded" />
                   </td>
-                  <td className="py-3.5 px-4">
-                    <div className="h-3.5 w-16 bg-muted rounded" />
+                  <td className="py-3 px-3 text-right">
+                    <div className="h-3.5 w-20 bg-muted rounded ml-auto" />
                   </td>
-                  <td className="py-3.5 px-4">
-                    <div className="h-5 w-16 bg-muted rounded" />
+                  <td className="py-3 px-3">
+                    <div className="h-4 w-20 bg-muted rounded mb-1" />
+                    <div className="h-3 w-32 bg-muted/60 rounded" />
                   </td>
-                  <td className="py-3.5 px-4">
-                    <div className="h-3.5 w-28 bg-muted rounded" />
+                  <td className="py-3 px-3">
+                    <div className="h-4 w-18 bg-muted rounded mb-1" />
+                    <div className="h-3 w-20 bg-muted/60 rounded" />
                   </td>
-                  <td className="py-3.5 px-4">
-                    <div className="h-5 w-16 bg-muted rounded" />
+                  <td className="py-3 px-3">
+                    <div className="h-4 w-24 bg-muted rounded" />
                   </td>
-                  <td className="py-3.5 px-4">
-                    <div className="h-3.5 w-14 bg-muted rounded" />
+                  <td className="py-3 px-3 text-right">
+                    <div className="h-4 w-20 bg-muted rounded mb-1 ml-auto" />
+                    <div className="h-3 w-16 bg-muted/60 rounded ml-auto" />
                   </td>
-                  <td className="py-3.5 px-4">
-                    <div className="h-3.5 w-24 bg-muted rounded" />
-                  </td>
-                  <td className="py-3.5 px-4">
-                    <div className="h-5 w-16 bg-muted rounded" />
-                  </td>
-                  <td className="py-3.5 px-4">
-                    <div className="h-3.5 w-14 bg-muted rounded" />
-                  </td>
-                  <td className="py-3.5 px-4 text-center">
-                    <div className="h-4 w-10 bg-muted rounded mx-auto" />
-                  </td>
-                  <td className="py-3.5 px-4 text-right">
+                  <td className="py-3 px-3 text-right">
                     <div className="h-6 w-12 bg-muted rounded ml-auto" />
                   </td>
                 </tr>
@@ -175,20 +220,20 @@ export function PaymentTable({
               // Empty State
               <tr>
                 <td
-                  colSpan={11}
+                  colSpan={7}
                   className="py-12 px-4 text-center text-muted-foreground"
                 >
                   <div className="flex flex-col items-center justify-center gap-2">
                     <svg
-                      className="h-8 w-8 text-muted-foreground/50"
+                      className="h-8 w-8 text-muted-foreground/40"
                       fill="none"
                       viewBox="0 0 24 24"
                       stroke="currentColor"
+                      strokeWidth="1.5"
                     >
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
-                        strokeWidth="1.5"
                         d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"
                       />
                     </svg>
@@ -206,11 +251,11 @@ export function PaymentTable({
               items.map((item) => {
                 const statusClass =
                   statusBadgeClasses[item.status] ||
-                  "bg-muted text-muted-foreground";
+                  "bg-muted text-muted-foreground border-border";
 
                 const worthinessClass = item.assessment
                   ? worthinessBadgeClasses[item.assessment.worthiness] ||
-                    "bg-muted text-muted-foreground"
+                    "bg-muted text-muted-foreground border-border"
                   : null;
 
                 const effectiveRecoveryStatus =
@@ -220,18 +265,18 @@ export function PaymentTable({
 
                 const outcomeClass = effectiveRecoveryStatus
                   ? recoveryOutcomeBadgeClasses[effectiveRecoveryStatus] ||
-                    "bg-muted text-muted-foreground"
+                    "bg-muted text-muted-foreground border-border"
                   : null;
 
                 return (
                   <tr
                     key={item.id}
-                    className="hover:bg-muted/30 transition-colors cursor-pointer group"
+                    className="hover:bg-muted/40 transition-colors cursor-pointer group"
                     onClick={() => setSelectedPayment(item)}
                   >
-                    {/* Payment / ID */}
-                    <td className="py-3 px-4">
-                      <div className="font-mono font-semibold text-foreground truncate max-w-[130px]">
+                    {/* 1. Payment ID & Timestamp */}
+                    <td className="py-2.5 px-3">
+                      <div className="font-mono font-medium text-foreground truncate max-w-[130px]">
                         {item.externalPaymentId}
                       </div>
                       <div className="text-[11px] text-muted-foreground font-mono">
@@ -242,134 +287,133 @@ export function PaymentTable({
                       </div>
                     </td>
 
-                    {/* Amount */}
-                    <td className="py-3 px-4 font-semibold text-foreground font-mono">
-                      {item.currency} {item.amount}
+                    {/* 2. Amount */}
+                    <td className="py-2.5 px-3 text-right font-semibold text-foreground font-mono tabular-nums whitespace-nowrap">
+                      {formatCurrency(item.amount, item.currency)}
                     </td>
 
-                    {/* Status */}
-                    <td className="py-3 px-4">
-                      <span
-                        className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${statusClass}`}
-                      >
-                        {item.status}
-                      </span>
-                    </td>
-
-                    {/* Failure Category & Reason */}
-                    <td className="py-3 px-4">
-                      {item.failure ? (
-                        <div className="max-w-[160px]">
-                          <span className="font-semibold text-rose-600 dark:text-rose-400 block truncate">
+                    {/* 3. Status & Failure Root Cause */}
+                    <td className="py-2.5 px-3">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span
+                          className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${statusClass}`}
+                        >
+                          {item.status}
+                        </span>
+                        {item.failure && (
+                          <span className="font-medium text-rose-700 dark:text-rose-300 truncate max-w-[150px]">
                             {item.failure.category}
                           </span>
-                          <span
-                            className="text-[11px] text-muted-foreground truncate block"
-                            title={item.failure.failureMessage || item.failure.failureCode || ""}
-                          >
-                            {item.failure.failureMessage || item.failure.failureCode || "Declined"}
-                          </span>
+                        )}
+                      </div>
+                      {item.failure?.failureMessage || item.failure?.failureCode ? (
+                        <div
+                          className="text-[11px] text-muted-foreground truncate max-w-[240px] mt-0.5"
+                          title={item.failure.failureMessage || item.failure.failureCode || ""}
+                        >
+                          {item.failure.failureMessage || item.failure.failureCode}
                         </div>
                       ) : (
-                        <span className="text-muted-foreground text-[11px]">
-                          —
-                        </span>
+                        <span className="text-muted-foreground text-[11px]">—</span>
                       )}
                     </td>
 
-                    {/* Worthiness */}
-                    <td className="py-3 px-4">
+                    {/* 4. Recoverability & Estimated Recovery */}
+                    <td className="py-2.5 px-3">
                       {item.assessment ? (
-                        <span
-                          className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${worthinessClass}`}
-                        >
-                          {item.assessment.worthiness}
-                        </span>
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span
+                              className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${worthinessClass}`}
+                            >
+                              {WORTHINESS_LABELS[item.assessment.worthiness] || item.assessment.worthiness}
+                            </span>
+                            {item.assessment.confidence !== null && item.assessment.confidence !== undefined && (
+                              <span className="text-[10px] font-mono text-muted-foreground">
+                                {Math.round(item.assessment.confidence * 100)}% confidence
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] font-mono tabular-nums text-foreground/90 font-medium">
+                            {item.assessment.estimatedRecoverableAmount !== null &&
+                            item.assessment.estimatedRecoverableAmount !== undefined ? (
+                              <span>
+                                Est. {formatCurrency(item.assessment.estimatedRecoverableAmount, item.currency)}
+                              </span>
+                            ) : (
+                              "Est. —"
+                            )}
+                          </div>
+                        </div>
                       ) : (
-                        <span className="text-muted-foreground text-[11px]">
-                          —
-                        </span>
+                        <span className="text-muted-foreground text-[11px]">—</span>
                       )}
                     </td>
 
-                    {/* Estimated Recoverable */}
-                    <td className="py-3 px-4 font-mono text-muted-foreground">
-                      {item.assessment?.estimatedRecoverableAmount !== null &&
-                      item.assessment?.estimatedRecoverableAmount !== undefined ? (
-                        <span className="text-foreground font-medium">
-                          {item.currency}{" "}
-                          {item.assessment.estimatedRecoverableAmount}
-                        </span>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-
-                    {/* Recommended Action */}
-                    <td className="py-3 px-4">
+                    {/* 5. Recommended Action */}
+                    <td className="py-2.5 px-3">
                       {item.recommendation ? (
-                        <span className="font-mono text-[11px] bg-muted/80 px-1.5 py-0.5 rounded border border-border/60 text-foreground">
-                          {item.recommendation.action}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground text-[11px]">
-                          —
-                        </span>
-                      )}
-                    </td>
-
-                    {/* Recovery Status */}
-                    <td className="py-3 px-4">
-                      {effectiveRecoveryStatus ? (
                         <span
-                          className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${outcomeClass}`}
-                        >
-                          {effectiveRecoveryStatus}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground text-[11px]">
-                          —
-                        </span>
-                      )}
-                    </td>
-
-                    {/* Actual Recovered */}
-                    <td className="py-3 px-4 font-mono">
-                      {item.latestOutcome?.actualRecoveredAmount !== null &&
-                      item.latestOutcome?.actualRecoveredAmount !== undefined ? (
-                        <span
-                          className={`font-semibold ${
-                            Number(item.latestOutcome.actualRecoveredAmount) > 0
-                              ? "text-emerald-600 dark:text-emerald-400"
-                              : "text-muted-foreground"
+                          className={`inline-block px-2 py-0.5 rounded text-[11px] font-medium border ${
+                            item.recommendation.action === "RETRY_PAYMENT"
+                              ? "bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border-indigo-500/20"
+                              : item.recommendation.action === "CUSTOMER_ACTION_REQUIRED"
+                              ? "bg-amber-500/10 text-amber-800 dark:text-amber-300 border-amber-500/20"
+                              : "bg-muted text-foreground border-border"
                           }`}
                         >
-                          {item.currency}{" "}
-                          {item.latestOutcome.actualRecoveredAmount}
+                          {ACTION_LABELS[item.recommendation.action] || item.recommendation.action}
                         </span>
                       ) : (
-                        <span className="text-muted-foreground">—</span>
+                        <span className="text-muted-foreground text-[11px]">
+                          —
+                        </span>
                       )}
                     </td>
 
-                    {/* Environment */}
-                    <td className="py-3 px-4 text-center">
-                      <span className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-amber-600 dark:text-amber-400">
-                        DEMO
-                      </span>
+                    {/* 6. Recovery Result & Actual Recovered */}
+                    <td className="py-2.5 px-3 text-right">
+                      {effectiveRecoveryStatus ? (
+                        <div>
+                          <span
+                            className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${outcomeClass}`}
+                          >
+                            {RECOVERY_OUTCOME_LABELS[effectiveRecoveryStatus] || effectiveRecoveryStatus}
+                          </span>
+                          <div className="font-mono tabular-nums text-[11px] mt-0.5">
+                            {item.latestOutcome?.actualRecoveredAmount !== null &&
+                            item.latestOutcome?.actualRecoveredAmount !== undefined ? (
+                              <span
+                                className={`font-semibold ${
+                                  Number(item.latestOutcome.actualRecoveredAmount) > 0
+                                    ? "text-emerald-700 dark:text-emerald-300"
+                                    : "text-muted-foreground"
+                                }`}
+                              >
+                                {formatCurrency(item.latestOutcome.actualRecoveredAmount, item.currency)}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground text-[11px]">—</span>
+                      )}
                     </td>
 
-                    {/* Actions */}
-                    <td className="py-3 px-4 text-right">
+                    {/* 7. Action Button */}
+                    <td className="py-2.5 px-3 text-right">
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
                           setSelectedPayment(item);
                         }}
-                        className="rounded-md border border-border bg-background px-2.5 py-1 text-[11px] font-semibold text-foreground hover:bg-muted active:scale-95 transition-all shadow-2xs"
+                        className="rounded border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted transition-colors cursor-pointer shadow-2xs"
+                        title="View payment lifecycle details"
                       >
-                        Audit
+                        View
                       </button>
                     </td>
                   </tr>
@@ -379,6 +423,7 @@ export function PaymentTable({
           </tbody>
         </table>
       </div>
+
 
       {/* Pagination Bar */}
       {pagination && pagination.totalPages > 0 && (

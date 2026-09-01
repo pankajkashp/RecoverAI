@@ -371,9 +371,10 @@ describe("Phase 9 — Frontend Dashboard", () => {
       );
 
       expect(html).toContain("Execute Recovery Attempt");
-      expect(html).toContain("4. Recommended Action");
+      expect(html).toContain("4. Recovery Action");
       expect(html).toContain("RETRY_PAYMENT");
       expect(html).not.toContain("Manual/customer action required");
+
     });
 
     it("does not show execution button for ineligible CUSTOMER_ACTION_REQUIRED action", async () => {
@@ -480,8 +481,9 @@ describe("Phase 9 — Frontend Dashboard", () => {
       expect(html).not.toContain("Execute Recovery Attempt");
       expect(html).toContain("Already Executed");
       expect(html).toContain("Successfully recovered");
-      expect(html).toContain("15000.00");
+      expect(html).toContain("15,000.00");
     });
+
 
     it("clicking button executes recovery and triggers refresh callback", async () => {
       const { performRecoveryExecution } = await import(

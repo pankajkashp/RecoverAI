@@ -16,13 +16,13 @@ export function DashboardHeader({
   isLoading = false,
 }: HeaderProps) {
   return (
-    <header className="border-b border-border/80 bg-card/60 backdrop-blur-md sticky top-0 z-30 transition-colors">
-      {/* Prominent Demo Notice Strip */}
+    <header className="border-b border-border bg-card sticky top-0 z-30 transition-colors">
+      {/* Environment & Mode Notice Strip */}
       {isDemo && (
-        <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-1.5 text-center text-xs font-semibold tracking-wide text-amber-600 dark:text-amber-400 flex items-center justify-center gap-2">
-          <span className="inline-flex h-2 w-2 rounded-full bg-amber-500 animate-ping" />
-          <span className="uppercase tracking-widest font-mono text-[11px]">
-            DEMO / SANDBOX ENVIRONMENT
+        <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-1.5 text-center text-xs font-medium text-amber-800 dark:text-amber-300 flex items-center justify-center gap-2">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
+          <span className="font-semibold tracking-wide text-[11px] uppercase">
+            Demo / Razorpay Test Mode
           </span>
           <span className="hidden sm:inline text-amber-700/80 dark:text-amber-300/80 text-xs">
             — Operating on synthetic payment failure simulations
@@ -30,12 +30,12 @@ export function DashboardHeader({
         </div>
       )}
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         {/* Brand & Company Scope */}
         <div className="flex items-center gap-3">
-          <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center shadow-md shadow-indigo-500/20">
+          <div className="h-8 w-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center shadow-xs">
             <svg
-              className="h-5 w-5 text-white"
+              className="h-4.5 w-4.5"
               fill="none"
               viewBox="0 0 24 24"
               strokeWidth="2.5"
@@ -51,20 +51,18 @@ export function DashboardHeader({
 
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-extrabold text-lg tracking-tight bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent">
+              <span className="font-bold text-base tracking-tight text-foreground">
                 RecoverAI
               </span>
-              <span className="rounded-md border border-indigo-500/30 bg-indigo-500/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
-                Phase 9
-              </span>
             </div>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span className="font-medium text-foreground/90">{companyName}</span>
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">{companyName}</span>
               <span>•</span>
-              <span className="font-mono text-[11px] text-muted-foreground/80">Scoped Tenant</span>
+              <span className="text-[11px] text-muted-foreground font-mono">Scoped Tenant</span>
             </div>
           </div>
         </div>
+
 
         {/* Action Controls & Theme Toggle */}
         <div className="flex items-center gap-2 sm:gap-3 self-end sm:self-auto">

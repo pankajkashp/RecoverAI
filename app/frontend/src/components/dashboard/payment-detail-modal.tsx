@@ -6,7 +6,7 @@ import {
   type RecoveryExecutionPipelineResult,
 } from "@recoverai/contracts";
 import { executeRecovery, ApiError } from "@/lib/api-client";
-
+import { formatCurrency } from "@/lib/utils";
 
 interface PaymentDetailModalProps {
   payment: PaymentLifecycleItem | null;
@@ -79,8 +79,6 @@ export function PaymentDetailModal({
 
   if (!payment) return null;
 
-
-
   const isAlreadySuccessful =
     payment.latestOutcome?.outcome === "SUCCESSFUL" ||
     executionResult?.outcomeStatus === "SUCCESSFUL";
@@ -97,33 +95,38 @@ export function PaymentDetailModal({
     });
   };
 
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-xs">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-xs"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="modal-title"
+    >
       <div
-        className="relative w-full max-w-2xl rounded-2xl border border-border bg-card p-6 shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
+        className="relative w-full max-w-2xl rounded-2xl border border-border bg-card p-5 sm:p-6 shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Header */}
-        <div className="flex items-center justify-between border-b border-border/80 pb-4">
+        <div className="flex items-center justify-between border-b border-border/80 pb-3.5">
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-lg font-bold text-foreground">
+              <h2 id="modal-title" className="text-base sm:text-lg font-bold text-foreground tracking-tight">
                 Payment Lifecycle Audit
               </h2>
-              <span className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-600 dark:text-amber-400">
-                Demo / Sandbox
+              <span className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-300">
+                Demo / Razorpay Test Mode
               </span>
             </div>
             <p className="text-xs text-muted-foreground font-mono mt-0.5">
-              ID: {payment.externalPaymentId}
+              Payment Ref: {payment.externalPaymentId}
             </p>
           </div>
 
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            aria-label="Close dialog"
+            className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
           >
             <svg
               className="h-5 w-5"
@@ -141,277 +144,242 @@ export function PaymentDetailModal({
           </button>
         </div>
 
-        {/* Modal Content / Timeline */}
-        <div className="mt-4 overflow-y-auto space-y-4 pr-1 text-xs">
-          {/* Step 1: Canonical Payment Event */}
-          <div className="rounded-xl border border-border/70 bg-muted/30 p-4 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
-                <span className="h-2 w-2 rounded-full bg-blue-500" />
-                1. Canonical Payment Event
-              </span>
-              <span className="font-mono text-muted-foreground text-[11px]">
-                {new Date(payment.eventTimestamp).toLocaleString()}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
-              <div>
-                <span className="text-muted-foreground block text-[11px]">
-                  Amount
-                </span>
-                <span className="font-semibold text-foreground">
-                  {payment.currency} {payment.amount}
-                </span>
-              </div>
-              <div>
-                <span className="text-muted-foreground block text-[11px]">
-                  Status
-                </span>
-                <span
-                  className={`font-semibold ${
-                    payment.status === "COMPLETED"
-                      ? "text-emerald-500"
-                      : "text-rose-500"
-                  }`}
-                >
-                  {payment.status}
-                </span>
-              </div>
-              <div>
-                <span className="text-muted-foreground block text-[11px]">
-                  Method
-                </span>
-                <span className="font-semibold text-foreground">
-                  {payment.paymentMethod}
-                </span>
-              </div>
-              <div>
-                <span className="text-muted-foreground block text-[11px]">
-                  Provider
-                </span>
-                <span className="font-semibold text-foreground">
-                  {payment.providerType}
-                </span>
-              </div>
-              <div>
-                <span className="text-muted-foreground block text-[11px]">
-                  Customer Ref
-                </span>
-                <span className="font-mono text-foreground">
-                  {payment.customerReference || "N/A"}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Step 2: Payment Failure Analysis */}
-          {payment.failure ? (
-            <div className="rounded-xl border border-rose-500/20 bg-rose-500/5 p-4 space-y-2">
+        {/* Modal Content / Unified Financial Ledger */}
+        <div className="mt-4 overflow-y-auto pr-1 space-y-3.5 text-xs">
+          <div className="rounded-xl border border-border bg-card divide-y divide-border/60 overflow-hidden shadow-2xs">
+            {/* 1. Transaction Details */}
+            <div className="p-4 space-y-2.5">
               <div className="flex items-center justify-between">
-                <span className="font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400 flex items-center gap-1.5">
+                <span className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-slate-500" />
+                  1. Transaction Details
+                </span>
+                <span className="font-mono text-muted-foreground text-[11px]">
+                  {new Date(payment.eventTimestamp).toLocaleString()}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+                <div>
+                  <span className="text-muted-foreground block text-[10px] uppercase font-semibold">
+                    Amount
+                  </span>
+                  <span className="font-mono font-bold text-foreground text-sm">
+                    {formatCurrency(payment.amount, payment.currency)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block text-[10px] uppercase font-semibold">
+                    Status
+                  </span>
+                  <span
+                    className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
+                      payment.status === "COMPLETED"
+                        ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
+                        : "bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/30"
+                    }`}
+                  >
+                    {payment.status}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block text-[10px] uppercase font-semibold">
+                    Method & Provider
+                  </span>
+                  <span className="font-medium text-foreground">
+                    {payment.paymentMethod} • {payment.providerType}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block text-[10px] uppercase font-semibold">
+                    Customer Ref
+                  </span>
+                  <span className="font-mono text-foreground truncate block">
+                    {payment.customerReference || "N/A"}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Failure Root Cause */}
+            <div className="p-4 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-2">
                   <span className="h-2 w-2 rounded-full bg-rose-500" />
-                  2. Failure Analysis
+                  2. Failure Root Cause
                 </span>
-                <span className="font-mono text-muted-foreground text-[11px]">
-                  {new Date(payment.failure.failedAt).toLocaleString()}
-                </span>
-              </div>
-
-              <div className="space-y-1 pt-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground">Category:</span>
-                  <span className="font-bold text-foreground">
-                    {payment.failure.category}
+                {payment.failure && (
+                  <span className="font-mono text-muted-foreground text-[11px]">
+                    {new Date(payment.failure.failedAt).toLocaleString()}
                   </span>
-                </div>
-                {payment.failure.failureCode && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-muted-foreground">Code:</span>
-                    <span className="font-mono text-foreground">
-                      {payment.failure.failureCode}
-                    </span>
-                  </div>
-                )}
-                {payment.failure.failureMessage && (
-                  <div className="text-muted-foreground mt-1">
-                    <span className="block text-[11px] font-semibold text-foreground/80">
-                      Reason / Message:
-                    </span>
-                    <p className="italic text-foreground/90 bg-background/50 p-2 rounded-md border border-border/40 mt-0.5">
-                      &ldquo;{payment.failure.failureMessage}&rdquo;
-                    </p>
-                  </div>
                 )}
               </div>
-            </div>
-          ) : (
-            <div className="p-3 rounded-lg bg-muted/20 text-muted-foreground italic">
-              No failure analysis required (Payment succeeded).
-            </div>
-          )}
 
-          {/* Step 3: Recovery Intelligence Assessment */}
-          {payment.assessment && (
-            <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-4 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-indigo-500" />
-                  3. Recovery Assessment
-                </span>
-                <span className="font-mono text-muted-foreground text-[11px]">
-                  {new Date(payment.assessment.assessedAt).toLocaleString()}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 pt-1">
-                <div>
-                  <span className="text-muted-foreground block text-[11px]">
-                    Worthiness Decision
-                  </span>
-                  <span className="font-bold text-foreground">
-                    {payment.assessment.worthiness}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground block text-[11px]">
-                    Estimated Recoverable
-                  </span>
-                  <span className="font-bold text-indigo-600 dark:text-indigo-400">
-                    {payment.currency}{" "}
-                    {payment.assessment.estimatedRecoverableAmount ?? "0.00"}
-                  </span>
-                </div>
-              </div>
-              {payment.assessment.reasoning && (
-                <div className="mt-1">
-                  <span className="text-muted-foreground block text-[11px]">
-                    Intelligence Reasoning:
-                  </span>
-                  <p className="text-foreground/90 mt-0.5">
-                    {payment.assessment.reasoning}
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Step 4: Recovery Recommendation & Execution */}
-          {payment.recommendation && (
-            <div className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="font-bold uppercase tracking-wider text-violet-600 dark:text-violet-400 flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-violet-500" />
-                  4. Recommended Action
-                </span>
-                <span className="font-mono text-muted-foreground text-[11px]">
-                  {new Date(payment.recommendation.createdAt).toLocaleString()}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 pt-1">
-                <div>
-                  <span className="text-muted-foreground block text-[11px]">
-                    Action
-                  </span>
-                  <span className="font-bold text-foreground">
-                    {payment.recommendation.action}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground block text-[11px]">
-                    Recommendation Status
-                  </span>
-                  <span className="font-semibold text-foreground">
-                    {executionResult
-                      ? executionResult.isExecuted
-                        ? "EXECUTED"
-                        : payment.recommendation.status
-                      : payment.recommendation.status}
-                  </span>
-                </div>
-              </div>
-
-              {payment.recommendation.reason && (
-                <div className="mt-1">
-                  <span className="text-muted-foreground block text-[11px]">
-                    Action Explanation:
-                  </span>
-                  <p className="text-foreground/90 mt-0.5">
-                    {payment.recommendation.reason}
-                  </p>
-                </div>
-              )}
-
-              {/* Execution Action & Status Feedback Section */}
-              <div
-                className="pt-2.5 border-t border-violet-500/20"
-                role="status"
-                aria-live="polite"
-              >
-                {/* Case A: Ineligible Actions: CUSTOMER_ACTION_REQUIRED, REVIEW, DO_NOT_RECOVER */}
-                {payment.recommendation.action !== "RETRY_PAYMENT" ? (
-                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 space-y-1">
-                    <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-300">
-                      <svg
-                        className="h-4 w-4 shrink-0 text-amber-500"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                        />
-                      </svg>
-                      <span>Manual/customer action required</span>
-                    </div>
-                    <p className="text-[11px] text-amber-800/90 dark:text-amber-200/90 leading-relaxed">
-                      {payment.recommendation.action ===
-                        "CUSTOMER_ACTION_REQUIRED" &&
-                        "Automated recovery unavailable: This failure requires customer intervention (e.g. updating payment method, re-authenticating 3D-Secure, or account balance verification)."}
-                      {payment.recommendation.action === "REVIEW" &&
-                        "Automated recovery unavailable: This transaction is flagged for manual risk/compliance review before any recovery attempt may proceed."}
-                      {payment.recommendation.action === "DO_NOT_RECOVER" &&
-                        "Automated recovery unavailable: Transaction was evaluated as non-recoverable (permanent decline or fraud prevention rule)."}
-                    </p>
-                  </div>
-                ) : isAlreadySuccessful && !executionResult ? (
-                  /* Case B: Already successfully executed before opening modal */
-                  <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
-                      <svg
-                        className="h-4 w-4 shrink-0 text-emerald-500"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                        />
-                      </svg>
-                      <span>Already Executed</span>
-                      <span className="text-[11px] font-normal text-muted-foreground">
-                        — Successfully recovered
+              {payment.failure ? (
+                <div className="space-y-2 pt-0.5">
+                  <div className="flex flex-wrap items-center gap-4 text-xs">
+                    <div>
+                      <span className="text-muted-foreground text-[10px] uppercase font-semibold block">
+                        Category
+                      </span>
+                      <span className="font-semibold text-rose-700 dark:text-rose-300">
+                        {payment.failure.category}
                       </span>
                     </div>
-                    <span className="text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                      {payment.currency}{" "}
-                      {payment.latestOutcome?.actualRecoveredAmount ?? "0.00"}
+                    {payment.failure.failureCode && (
+                      <div>
+                        <span className="text-muted-foreground text-[10px] uppercase font-semibold block">
+                          Failure Code
+                        </span>
+                        <span className="font-mono text-foreground">
+                          {payment.failure.failureCode}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {payment.failure.failureMessage && (
+                    <div className="rounded-md border border-border/70 bg-muted/30 p-2.5">
+                      <span className="text-[10px] font-semibold uppercase text-muted-foreground block mb-0.5">
+                        Provider Failure Explanation
+                      </span>
+                      <p className="text-foreground/90 font-mono text-[11px] leading-relaxed">
+                        &ldquo;{payment.failure.failureMessage}&rdquo;
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="text-muted-foreground text-xs italic">
+                  No failure detected for this transaction.
+                </p>
+              )}
+            </div>
+
+            {/* 3. Recovery Intelligence */}
+            {payment.assessment && (
+              <div className="p-4 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-sky-500" />
+                    3. Recovery Intelligence
+                  </span>
+                  <span className="font-mono text-muted-foreground text-[11px]">
+                    {new Date(payment.assessment.assessedAt).toLocaleString()}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-0.5">
+                  <div>
+                    <span className="text-muted-foreground block text-[10px] uppercase font-semibold">
+                      Worthiness Decision
+                    </span>
+                    <span
+                      className={`inline-flex items-center rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
+                        payment.assessment.worthiness === "RECOVER"
+                          ? "bg-sky-500/10 text-sky-800 dark:text-sky-300 border-sky-500/30"
+                          : payment.assessment.worthiness === "REVIEW"
+                          ? "bg-amber-500/10 text-amber-800 dark:text-amber-300 border-amber-500/30"
+                          : "bg-muted text-muted-foreground border-border"
+                      }`}
+                    >
+                      {payment.assessment.worthiness}
                     </span>
                   </div>
-                ) : executionResult ? (
-                  /* Case C: Execution Result Returned from API */
-                  executionResult.status === "ALREADY_EXECUTED" ? (
-                    <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 p-3 space-y-1">
-                      <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-700 dark:text-blue-300">
+
+                  <div>
+                    <span className="text-muted-foreground block text-[10px] uppercase font-semibold">
+                      Estimated Recoverable
+                    </span>
+                    <span className="font-mono font-bold text-foreground text-sm">
+                      {formatCurrency(
+                        payment.assessment.estimatedRecoverableAmount,
+                        payment.currency
+                      )}
+                    </span>
+                  </div>
+
+                  {payment.assessment.confidence !== null &&
+                    payment.assessment.confidence !== undefined && (
+                      <div>
+                        <span className="text-muted-foreground block text-[10px] uppercase font-semibold">
+                          Model Confidence
+                        </span>
+                        <span className="font-mono font-semibold text-foreground">
+                          {Math.round(payment.assessment.confidence * 100)}%
+                        </span>
+                      </div>
+                    )}
+                </div>
+
+
+                {payment.assessment.reasoning && (
+                  <div className="rounded-md border border-border/70 bg-muted/30 p-2.5">
+                    <span className="text-[10px] font-semibold uppercase text-muted-foreground block mb-0.5">
+                      Recovery Intelligence Reasoning
+                    </span>
+                    <p className="text-foreground/90 leading-relaxed">
+                      {payment.assessment.reasoning}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 4. Recovery Action & Interactive Execution */}
+            {payment.recommendation && (
+              <div className="p-4 space-y-3 bg-muted/10">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-indigo-500" />
+                    4. Recovery Action
+                  </span>
+                  <span className="font-mono text-muted-foreground text-[11px]">
+                    {new Date(payment.recommendation.createdAt).toLocaleString()}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 pt-0.5">
+                  <div>
+                    <span className="text-muted-foreground block text-[10px] uppercase font-semibold">
+                      Recommended Action
+                    </span>
+                    <span className="font-mono font-semibold text-foreground bg-muted px-2 py-0.5 rounded border border-border inline-block">
+                      {payment.recommendation.action}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block text-[10px] uppercase font-semibold">
+                      Recommendation Status
+                    </span>
+                    <span className="font-semibold text-foreground">
+                      {executionResult
+                        ? executionResult.isExecuted
+                          ? "EXECUTED"
+                          : payment.recommendation.status
+                        : payment.recommendation.status}
+                    </span>
+                  </div>
+                </div>
+
+                {payment.recommendation.reason && (
+                  <p className="text-foreground/90 text-xs leading-relaxed">
+                    {payment.recommendation.reason}
+                  </p>
+                )}
+
+                {/* Execution / Resolution Sub-Panel */}
+                <div
+                  className="pt-3 border-t border-border/60"
+                  role="status"
+                  aria-live="polite"
+                >
+                  {/* Ineligible Actions */}
+                  {payment.recommendation.action !== "RETRY_PAYMENT" ? (
+                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 space-y-1">
+                      <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-800 dark:text-amber-300">
                         <svg
-                          className="h-4 w-4 shrink-0 text-blue-500"
+                          className="h-4 w-4 shrink-0 text-amber-500"
                           fill="none"
                           viewBox="0 0 24 24"
                           stroke="currentColor"
@@ -420,21 +388,57 @@ export function PaymentDetailModal({
                           <path
                             strokeLinecap="round"
                             strokeLinejoin="round"
-                            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                          />
+                        </svg>
+                        <span>Manual/customer action required</span>
+                      </div>
+                      <p className="text-[11px] text-amber-800/90 dark:text-amber-200/90 leading-relaxed">
+                        {payment.recommendation.action ===
+                          "CUSTOMER_ACTION_REQUIRED" &&
+                          "Automated recovery unavailable: This failure requires customer intervention (e.g. updating payment method, re-authenticating 3D-Secure, or account balance verification)."}
+                        {payment.recommendation.action === "REVIEW" &&
+                          "Automated recovery unavailable: This transaction is flagged for manual risk/compliance review before any recovery attempt may proceed."}
+                        {payment.recommendation.action === "DO_NOT_RECOVER" &&
+                          "Automated recovery unavailable: Transaction was evaluated as non-recoverable (permanent decline or fraud prevention rule)."}
+                      </p>
+                    </div>
+                  ) : isAlreadySuccessful && !executionResult ? (
+                    /* Already successfully executed prior to opening modal */
+                    <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+                        <svg
+                          className="h-4 w-4 shrink-0 text-emerald-500"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
                           />
                         </svg>
                         <span>Already Executed</span>
+                        <span className="text-[11px] font-normal text-muted-foreground">
+                          — Successfully recovered
+                        </span>
                       </div>
-                      <p className="text-[11px] text-blue-800/90 dark:text-blue-200/90">
-                        {executionResult.message}
-                      </p>
+                      <span className="text-xs font-mono font-bold text-emerald-700 dark:text-emerald-300">
+                        {formatCurrency(
+                          payment.latestOutcome?.actualRecoveredAmount,
+                          payment.currency
+                        )}
+                      </span>
                     </div>
-                  ) : executionResult.outcomeStatus === "SUCCESSFUL" ? (
-                    <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 space-y-1">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                  ) : executionResult ? (
+                    /* Execution Result Returned from API */
+                    executionResult.status === "ALREADY_EXECUTED" ? (
+                      <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 space-y-1">
+                        <div className="flex items-center gap-1.5 text-xs font-semibold text-sky-800 dark:text-sky-300">
                           <svg
-                            className="h-4 w-4 shrink-0 text-emerald-500"
+                            className="h-4 w-4 shrink-0 text-sky-500"
                             fill="none"
                             viewBox="0 0 24 24"
                             stroke="currentColor"
@@ -443,103 +447,21 @@ export function PaymentDetailModal({
                             <path
                               strokeLinecap="round"
                               strokeLinejoin="round"
-                              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                             />
                           </svg>
-                          <span>Recovery Successful</span>
+                          <span>Already Executed</span>
                         </div>
-                        <span className="text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                          {payment.currency}{" "}
-                          {executionResult.actualRecoveredAmount ?? "0.00"} recovered
-                        </span>
+                        <p className="text-[11px] text-sky-800/90 dark:text-sky-200/90">
+                          {executionResult.message}
+                        </p>
                       </div>
-                      <p className="text-[11px] text-emerald-800/90 dark:text-emerald-200/90">
-                        {executionResult.message}
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 space-y-1">
-                      <div className="flex items-center gap-1.5 text-xs font-semibold text-rose-700 dark:text-rose-300">
-                        <svg
-                          className="h-4 w-4 shrink-0 text-rose-500"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"
-                          />
-                        </svg>
-                        <span>Recovery Failed</span>
-                      </div>
-                      <p className="text-[11px] text-rose-800/90 dark:text-rose-200/90">
-                        {executionResult.message ||
-                          "Recovery attempt executed but funds could not be recovered."}
-                      </p>
-                    </div>
-                  )
-                ) : (
-                  /* Case D: Eligible for Execution — Show Primary Action Button */
-                  <div className="space-y-2">
-                    {executionError && (
-                      <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-2.5 flex items-start gap-2 text-xs text-rose-600 dark:text-rose-400">
-                        <svg
-                          className="h-4 w-4 shrink-0 mt-0.5 text-rose-500"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                          />
-                        </svg>
-                        <div>
-                          <span className="font-semibold block">Recovery Failed</span>
-                          <span className="text-[11px] text-rose-700/90 dark:text-rose-300/90">
-                            {executionError}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
-                      <p className="text-[11px] text-muted-foreground">
-                        Initiates synthetic automated retry via provider adapter boundary.
-                      </p>
-                      <button
-                        type="button"
-                        onClick={handleExecute}
-                        disabled={isExecuting}
-                        aria-busy={isExecuting}
-                        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-500 active:scale-95 disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 transition-all cursor-pointer shrink-0"
-                      >
-                        {isExecuting ? (
-                          <>
+                    ) : executionResult.outcomeStatus === "SUCCESSFUL" ? (
+                      <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 space-y-1">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-800 dark:text-emerald-300">
                             <svg
-                              className="h-3.5 w-3.5 animate-spin"
-                              fill="none"
-                              viewBox="0 0 24 24"
-                              stroke="currentColor"
-                              strokeWidth="2.5"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                              />
-                            </svg>
-                            <span>Executing...</span>
-                          </>
-                        ) : (
-                          <>
-                            <svg
-                              className="h-3.5 w-3.5"
+                              className="h-4 w-4 shrink-0 text-emerald-500"
                               fill="none"
                               viewBox="0 0 24 24"
                               stroke="currentColor"
@@ -548,131 +470,232 @@ export function PaymentDetailModal({
                               <path
                                 strokeLinecap="round"
                                 strokeLinejoin="round"
-                                d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
-                              />
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
                               />
                             </svg>
-                            <span>Execute Recovery Attempt</span>
-                          </>
-                        )}
-                      </button>
+                            <span>Recovery Successful</span>
+                          </div>
+                          <span className="text-xs font-mono font-bold text-emerald-700 dark:text-emerald-300">
+                            {formatCurrency(
+                              executionResult.actualRecoveredAmount,
+                              payment.currency
+                            )}{" "}
+                            recovered
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-emerald-800/90 dark:text-emerald-200/90">
+                          {executionResult.message}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 space-y-1">
+                        <div className="flex items-center gap-1.5 text-xs font-semibold text-rose-800 dark:text-rose-300">
+                          <svg
+                            className="h-4 w-4 shrink-0 text-rose-500"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"
+                            />
+                          </svg>
+                          <span>Recovery Failed</span>
+                        </div>
+                        <p className="text-[11px] text-rose-800/90 dark:text-rose-200/90">
+                          {executionResult.message ||
+                            "Recovery attempt executed but funds could not be recovered."}
+                        </p>
+                      </div>
+                    )
+                  ) : (
+                    /* Eligible for Execution — Primary Action Trigger */
+                    <div className="space-y-2">
+                      {executionError && (
+                        <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-2.5 flex items-start gap-2 text-xs text-rose-700 dark:text-rose-300">
+                          <svg
+                            className="h-4 w-4 shrink-0 mt-0.5 text-rose-500"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                            />
+                          </svg>
+                          <div>
+                            <span className="font-semibold block">Recovery Failed</span>
+                            <span className="text-[11px] leading-relaxed">
+                              {executionError}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+                        <p className="text-[11px] text-muted-foreground">
+                          Initiates synthetic automated retry via provider adapter boundary.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={handleExecute}
+                          disabled={isExecuting}
+                          aria-busy={isExecuting}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-indigo-500 active:scale-95 disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 transition-all cursor-pointer shrink-0"
+                        >
+                          {isExecuting ? (
+                            <>
+                              <svg
+                                className="h-3.5 w-3.5 animate-spin text-white"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                              >
+                                <circle
+                                  className="opacity-25"
+                                  cx="12"
+                                  cy="12"
+                                  r="10"
+                                  stroke="currentColor"
+                                  strokeWidth="4"
+                                />
+                                <path
+                                  className="opacity-75"
+                                  fill="currentColor"
+                                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                                />
+                              </svg>
+                              <span>Executing...</span>
+                            </>
+                          ) : (
+                            <>
+                              <svg
+                                className="h-3.5 w-3.5"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
+                                />
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                                />
+                              </svg>
+                              <span>Execute Recovery Attempt</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* 5. Verified Outcome */}
+            {(executionResult || payment.latestAttempt) && (
+              <div className="p-4 space-y-2.5 bg-muted/20">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-2">
+                    <span
+                      className={`h-2 w-2 rounded-full ${
+                        (executionResult
+                          ? executionResult.outcomeStatus === "SUCCESSFUL"
+                          : payment.latestOutcome?.outcome === "SUCCESSFUL")
+                          ? "bg-emerald-500"
+                          : "bg-rose-500"
+                      }`}
+                    />
+                    5. Verified Outcome
+                  </span>
+                  <span className="font-mono text-muted-foreground text-[11px]">
+                    {executionResult
+                      ? "Verified just now"
+                      : payment.latestOutcome?.outcomeTimestamp
+                      ? new Date(
+                          payment.latestOutcome.outcomeTimestamp
+                        ).toLocaleString()
+                      : ""}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-1">
+                  <div>
+                    <span className="text-muted-foreground block text-[10px] uppercase font-semibold">
+                      Attempt Status
+                    </span>
+                    <span className="font-mono font-semibold text-foreground">
+                      {executionResult
+                        ? executionResult.attemptStatus
+                        : payment.latestAttempt?.status}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block text-[10px] uppercase font-semibold">
+                      Outcome Status
+                    </span>
+                    <span
+                      className={`font-semibold ${
+                        (executionResult
+                          ? executionResult.outcomeStatus === "SUCCESSFUL"
+                          : payment.latestOutcome?.outcome === "SUCCESSFUL")
+                          ? "text-emerald-700 dark:text-emerald-300"
+                          : "text-rose-700 dark:text-rose-300"
+                      }`}
+                    >
+                      {executionResult
+                        ? executionResult.outcomeStatus
+                        : payment.latestOutcome?.outcome ?? "PENDING"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block text-[10px] uppercase font-semibold">
+                      Actually Recovered
+                    </span>
+                    <span className="font-bold text-emerald-700 dark:text-emerald-300 font-mono text-sm">
+                      {formatCurrency(
+                        executionResult
+                          ? executionResult.actualRecoveredAmount
+                          : payment.latestOutcome?.actualRecoveredAmount,
+                        payment.currency
+                      )}
+                    </span>
+                  </div>
+                </div>
+
+                {(executionResult?.message || payment.latestOutcome?.notes) && (
+                  <div className="rounded-md border border-border/70 bg-card p-2.5 mt-2">
+                    <span className="text-[10px] font-semibold uppercase text-muted-foreground block mb-0.5">
+                      Provider Verification Notes
+                    </span>
+                    <p className="text-foreground/90 font-mono text-[11px] leading-relaxed">
+                      &ldquo;
+                      {executionResult?.message || payment.latestOutcome?.notes}
+                      &rdquo;
+                    </p>
                   </div>
                 )}
               </div>
-            </div>
-          )}
-
-          {/* Step 5: Execution Attempt & Actual Outcome */}
-          {(executionResult || payment.latestAttempt) && (
-            <div
-              className={`rounded-xl border p-4 space-y-2 ${
-                (executionResult
-                  ? executionResult.outcomeStatus === "SUCCESSFUL"
-                  : payment.latestOutcome?.outcome === "SUCCESSFUL")
-                  ? "border-emerald-500/20 bg-emerald-500/5"
-                  : "border-rose-500/20 bg-rose-500/5"
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span
-                  className={`font-bold uppercase tracking-wider flex items-center gap-1.5 ${
-                    (executionResult
-                      ? executionResult.outcomeStatus === "SUCCESSFUL"
-                      : payment.latestOutcome?.outcome === "SUCCESSFUL")
-                      ? "text-emerald-600 dark:text-emerald-400"
-                      : "text-rose-600 dark:text-rose-400"
-                  }`}
-                >
-                  <span
-                    className={`h-2 w-2 rounded-full ${
-                      (executionResult
-                        ? executionResult.outcomeStatus === "SUCCESSFUL"
-                        : payment.latestOutcome?.outcome === "SUCCESSFUL")
-                        ? "bg-emerald-500"
-                        : "bg-rose-500"
-                    }`}
-                  />
-                  5. Recovery Execution & Actual Outcome
-                </span>
-                <span className="font-mono text-muted-foreground text-[11px]">
-                  {executionResult
-                    ? "Just now"
-                    : payment.latestOutcome?.outcomeTimestamp
-                    ? new Date(
-                        payment.latestOutcome.outcomeTimestamp
-                      ).toLocaleString()
-                    : ""}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
-                <div>
-                  <span className="text-muted-foreground block text-[11px]">
-                    Attempt Status
-                  </span>
-                  <span className="font-semibold text-foreground">
-                    {executionResult
-                      ? executionResult.attemptStatus
-                      : payment.latestAttempt?.status}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground block text-[11px]">
-                    Outcome Status
-                  </span>
-                  <span
-                    className={`font-bold ${
-                      (executionResult
-                        ? executionResult.outcomeStatus === "SUCCESSFUL"
-                        : payment.latestOutcome?.outcome === "SUCCESSFUL")
-                        ? "text-emerald-600 dark:text-emerald-400"
-                        : "text-rose-600 dark:text-rose-400"
-                    }`}
-                  >
-                    {executionResult
-                      ? executionResult.outcomeStatus
-                      : payment.latestOutcome?.outcome ?? "PENDING"}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground block text-[11px]">
-                    Actual Recovered
-                  </span>
-                  <span className="font-bold text-emerald-600 dark:text-emerald-400 font-mono">
-                    {payment.currency}{" "}
-                    {executionResult
-                      ? executionResult.actualRecoveredAmount ?? "0.00"
-                      : payment.latestOutcome?.actualRecoveredAmount ?? "0.00"}
-                  </span>
-                </div>
-              </div>
-
-              {(executionResult?.message || payment.latestOutcome?.notes) && (
-                <div className="mt-1">
-                  <span className="text-muted-foreground block text-[11px]">
-                    Outcome Notes:
-                  </span>
-                  <p className="text-foreground/90 mt-0.5 italic">
-                    &ldquo;
-                    {executionResult?.message || payment.latestOutcome?.notes}
-                    &rdquo;
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         {/* Modal Footer */}
         <div className="mt-4 pt-3 border-t border-border flex items-center justify-between">
           <div className="text-[11px] text-muted-foreground">
             {executionResult?.isExecuted && (
-              <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+              <span className="text-emerald-700 dark:text-emerald-300 font-medium flex items-center gap-1.5">
                 <svg
                   className="h-3.5 w-3.5 shrink-0"
                   fill="none"
@@ -695,11 +718,11 @@ export function PaymentDetailModal({
             onClick={onClose}
             className="rounded-lg border border-border bg-muted px-4 py-2 text-xs font-semibold text-foreground hover:bg-muted/80 transition-colors cursor-pointer"
           >
-            Close Audit
+            Close Details
           </button>
+
         </div>
       </div>
     </div>
   );
 }
-
