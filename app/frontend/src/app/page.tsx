@@ -200,7 +200,9 @@ export default function DashboardPage() {
             setPageSize(newSize);
             setPage(1);
           }}
+          onRecoverySuccess={handleRefreshAll}
         />
+
       </main>
 
       {/* Footer */}

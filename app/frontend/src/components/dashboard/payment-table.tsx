@@ -13,7 +13,9 @@ interface PaymentTableProps {
   onSortChange: (field: "eventTimestamp" | "amount") => void;
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
+  onRecoverySuccess?: () => void;
 }
+
 
 const statusBadgeClasses: Record<string, string> = {
   COMPLETED:
@@ -58,7 +60,9 @@ export function PaymentTable({
   onSortChange,
   onPageChange,
   onPageSizeChange,
+  onRecoverySuccess,
 }: PaymentTableProps) {
+
   const [selectedPayment, setSelectedPayment] =
     useState<PaymentLifecycleItem | null>(null);
 
@@ -422,10 +426,14 @@ export function PaymentTable({
       {/* Detail Modal */}
       {selectedPayment && (
         <PaymentDetailModal
+          key={selectedPayment.id}
           payment={selectedPayment}
           onClose={() => setSelectedPayment(null)}
+          onRecoverySuccess={onRecoverySuccess}
         />
       )}
+
+
     </div>
   );
 }

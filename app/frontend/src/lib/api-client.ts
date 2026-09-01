@@ -13,6 +13,8 @@ import {
   type DashboardSummaryResponse,
   type DashboardPaymentsQuery,
   type DashboardPaymentsResponse,
+  type RecoveryExecutionRequest,
+  type RecoveryExecutionPipelineResult,
 } from "@recoverai/contracts";
 
 const API_BASE_URL =
@@ -28,6 +30,67 @@ export class ApiError extends Error {
     this.name = "ApiError";
   }
 }
+
+/**
+ * Triggers execution of an eligible recovery recommendation.
+ * Communicates with POST /api/recovery-attempts.
+ * Supports recommendationId, paymentEventId, and forceSimulationOutcome.
+ */
+export async function executeRecovery(
+  request: RecoveryExecutionRequest,
+  token?: string
+): Promise<RecoveryExecutionPipelineResult> {
+  if (!request.recommendationId && !request.paymentEventId) {
+    throw new ApiError(
+      400,
+      "Either recommendationId or paymentEventId must be provided for recovery execution"
+    );
+  }
+
+  const url = `${API_BASE_URL}/api/recovery-attempts`;
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  } else if (typeof window !== "undefined") {
+    try {
+      const storedToken = localStorage.getItem("recoverai_token");
+      if (storedToken) {
+        headers["Authorization"] = `Bearer ${storedToken}`;
+      }
+    } catch {
+      // localStorage may be unavailable
+    }
+  }
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(request),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    let errorMsg = `Failed to execute recovery: HTTP ${response.status}`;
+    let details: unknown = undefined;
+    try {
+      const errJson = await response.json();
+      if (errJson.error) errorMsg = errJson.error;
+      if (errJson.details) details = errJson.details;
+    } catch {
+      // ignore parse error
+    }
+    throw new ApiError(response.status, errorMsg, details);
+  }
+
+  const json = await response.json();
+  return json.data as RecoveryExecutionPipelineResult;
+}
+
 
 /**
  * Fetches company dashboard summary metrics.
