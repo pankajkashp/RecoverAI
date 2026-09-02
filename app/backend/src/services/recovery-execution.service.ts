@@ -463,7 +463,11 @@ export class RecoveryExecutionService {
       }
 
       return { attempt: updatedAttempt, outcome };
+    }, {
+      timeout: 30000,
+      maxWait: 15000,
     });
+
 
 
     return {

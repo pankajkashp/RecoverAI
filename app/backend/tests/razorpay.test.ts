@@ -421,5 +421,384 @@ describe("Phase 11 — Razorpay Sandbox Integration", () => {
       expect(forcedOutcome.actualRecoveredAmount).toBe(3000.0);
     });
   });
+
+  describe("Razorpay Empty Array & Webhook Envelope Handling", () => {
+    const testAdapter = new RazorpayProviderAdapter();
+
+    it("handles notes: [], acquirer_data: [], and metadata: [] without throwing Zod errors", () => {
+      const payloadWithEmptyArrays = {
+        entity: "event",
+        event: "payment.failed",
+        contains: ["payment"],
+        payload: {
+          payment: {
+            entity: {
+              id: "pay_rzp_empty_arr_001",
+              entity: "payment",
+              amount: 50000,
+              currency: "INR",
+              status: "failed",
+              order_id: "order_empty_arr_001",
+              method: "upi",
+              notes: [], // Razorpay empty associative array
+              acquirer_data: [], // Razorpay empty associative array
+              error_code: "BAD_REQUEST_ERROR",
+              error_description: "Payment failed due to invalid UPI PIN",
+              error_reason: "payment_failed",
+              error: {
+                code: "BAD_REQUEST_ERROR",
+                description: "Payment failed due to invalid UPI PIN",
+                metadata: [], // Razorpay empty array in error metadata
+              },
+              created_at: 1724600000,
+            },
+          },
+        },
+      };
+
+      const canonical = testAdapter.normalize(payloadWithEmptyArrays, {
+        companyId: testCompanyId,
+      });
+
+      expect(canonical.externalPaymentId).toBe("pay_rzp_empty_arr_001");
+      expect(canonical.amount).toBe(500.0);
+      expect(canonical.status).toBe("FAILED");
+      expect(canonical.metadata?.notes).toEqual({});
+      expect(canonical.metadata?.acquirerData).toEqual({});
+    });
+
+    it("normalizes order.paid webhooks containing order and payment entities", () => {
+      const orderPaidPayload = {
+        entity: "event",
+        event: "order.paid",
+        contains: ["order", "payment"],
+        payload: {
+          order: {
+            entity: {
+              id: "order_rzp_paid_101",
+              entity: "order",
+              amount: 75000,
+              amount_paid: 75000,
+              currency: "INR",
+              status: "paid",
+              notes: [],
+              created_at: 1724600000,
+            },
+          },
+          payment: {
+            entity: {
+              id: "pay_rzp_order_paid_101",
+              entity: "payment",
+              amount: 75000,
+              currency: "INR",
+              status: "captured",
+              order_id: "order_rzp_paid_101",
+              method: "card",
+              notes: [],
+              created_at: 1724600000,
+            },
+          },
+        },
+      };
+
+      const canonical = testAdapter.normalize(orderPaidPayload, {
+        companyId: testCompanyId,
+      });
+
+      expect(canonical.externalPaymentId).toBe("pay_rzp_order_paid_101");
+      expect(canonical.amount).toBe(750.0);
+      expect(canonical.status).toBe("COMPLETED");
+      expect(canonical.orderReference).toBe("order_rzp_paid_101");
+    });
+
+    it("ingests real-world Razorpay webhook with notes: [] via HTTP endpoint without error", async () => {
+      const paymentId = `pay_rzp_live_${Date.now()}`;
+      const payload = {
+        entity: "event",
+        account_id: "acc_test_12345",
+        event: "payment.failed",
+        contains: ["payment"],
+        payload: {
+          payment: {
+            entity: {
+              id: paymentId,
+              entity: "payment",
+              amount: 20000, // 200 INR
+              currency: "INR",
+              status: "failed",
+              order_id: `order_${Date.now()}`,
+              invoice_id: null,
+              international: false,
+              method: "upi",
+              amount_refunded: 0,
+              refund_status: null,
+              captured: false,
+              description: "Test payment with empty notes array",
+              card_id: null,
+              bank: null,
+              wallet: null,
+              vpa: "customer@upi",
+              email: "test@example.com",
+              contact: "+919876543210",
+              notes: [], // THE EXACT CAUSE OF "expected record, received array"
+              fee: null,
+              tax: null,
+              error_code: "BAD_REQUEST_ERROR",
+              error_description: "Payment failed at issuing bank",
+              error_source: "bank",
+              error_step: "payment_authorization",
+              error_reason: "insufficient_funds",
+              acquirer_data: [],
+              created_at: Math.floor(Date.now() / 1000),
+            },
+          },
+        },
+      };
+
+      const rawBody = JSON.stringify(payload);
+      const signature = crypto
+        .createHmac("sha256", TEST_WEBHOOK_SECRET)
+        .update(rawBody)
+        .digest("hex");
+
+      const res = await request(app)
+        .post(`/api/webhooks/razorpay?companyId=${testCompanyId}`)
+        .set("Content-Type", "application/json")
+        .set("X-Razorpay-Signature", signature)
+        .send(rawBody);
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.externalPaymentId).toBe(paymentId);
+      expect(res.body.status).toBe("FAILED");
+    });
+
+    it("correctly classifies the actual Razorpay test failure (card authorization gateway failure: BAD_REQUEST_ERROR / payment_failed / gateway) as PROVIDER and not UNKNOWN", async () => {
+      const paymentId = `pay_rzp_real_232_${Date.now()}`;
+      const payload = {
+        entity: "event",
+        account_id: "acc_TUKVGUGRV6SA5i",
+        event: "payment.failed",
+        contains: ["payment"],
+        payload: {
+          payment: {
+            entity: {
+              id: paymentId,
+              entity: "payment",
+              amount: 23200, // 232 INR
+              currency: "INR",
+              status: "failed",
+              order_id: `order_real_232_${Date.now()}`,
+              invoice_id: null,
+              international: false,
+              method: "card",
+              amount_refunded: 0,
+              refund_status: null,
+              captured: false,
+              description: "Payment failed",
+              card_id: "card_real_1007",
+              card: {
+                id: "card_real_1007",
+                entity: "card",
+                name: "Test User",
+                last4: "1007",
+                network: "Visa",
+                type: "debit",
+                issuer: "DCBL",
+                international: false,
+                emi: false,
+              },
+              bank: null,
+              wallet: null,
+              vpa: null,
+              email: "customer@example.com",
+              contact: "+919876543210",
+              notes: [],
+              fee: null,
+              tax: null,
+              error_code: "BAD_REQUEST_ERROR",
+              error_description: "Payment failed",
+              error_source: "gateway",
+              error_step: "payment_authorization",
+              error_reason: "payment_failed",
+              acquirer_data: { auth_code: null },
+              created_at: Math.floor(Date.now() / 1000),
+            },
+          },
+        },
+      };
+
+      const rawBody = JSON.stringify(payload);
+      const signature = crypto
+        .createHmac("sha256", TEST_WEBHOOK_SECRET)
+        .update(rawBody)
+        .digest("hex");
+
+      const res = await request(app)
+        .post(`/api/webhooks/razorpay?companyId=${testCompanyId}`)
+        .set("Content-Type", "application/json")
+        .set("X-Razorpay-Signature", signature)
+        .send(rawBody);
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.externalPaymentId).toBe(paymentId);
+
+      // Verify failure classification in database
+      const dbPayment = await prisma.paymentEvent.findFirst({
+        where: { externalPaymentId: paymentId, companyId: testCompanyId },
+        include: { failure: true, assessment: true, recommendation: true },
+      });
+
+      expect(dbPayment).toBeDefined();
+      expect(dbPayment?.failure?.category).toBe("PROVIDER");
+      expect(dbPayment?.failure?.category).not.toBe("UNKNOWN");
+      expect(dbPayment?.assessment?.worthiness).toBe("RECOVER");
+      expect(Number(dbPayment?.assessment?.estimatedRecoverableAmount)).toBe(232.0);
+      expect(dbPayment?.recommendation?.action).toBe("RETRY_PAYMENT");
+    });
+
+    it("correctly classifies UPI MPIN failure as AUTHENTICATION", async () => {
+      const paymentId = `pay_rzp_upi_mpin_${Date.now()}`;
+      const payload = {
+        entity: "event",
+        event: "payment.failed",
+        payload: {
+          payment: {
+            entity: {
+              id: paymentId,
+              entity: "payment",
+              amount: 50000,
+              currency: "INR",
+              status: "failed",
+              method: "upi",
+              error_code: "BAD_REQUEST_ERROR",
+              error_description: "UPI PIN entered is incorrect",
+              error_source: "customer",
+              error_step: "payment_authentication",
+              error_reason: "incorrect_upi_pin",
+              created_at: Math.floor(Date.now() / 1000),
+            },
+          },
+        },
+      };
+
+      const rawBody = JSON.stringify(payload);
+      const signature = crypto
+        .createHmac("sha256", TEST_WEBHOOK_SECRET)
+        .update(rawBody)
+        .digest("hex");
+
+      const res = await request(app)
+        .post(`/api/webhooks/razorpay?companyId=${testCompanyId}`)
+        .set("Content-Type", "application/json")
+        .set("X-Razorpay-Signature", signature)
+        .send(rawBody);
+
+      expect(res.status).toBe(200);
+
+      const dbPayment = await prisma.paymentEvent.findFirst({
+        where: { externalPaymentId: paymentId },
+        include: { failure: true },
+      });
+
+      expect(dbPayment?.paymentMethod).toBe("UPI");
+      expect(dbPayment?.failure?.category).toBe("AUTHENTICATION");
+    });
+
+    it("correctly classifies acquirer response_code 51 as INSUFFICIENT_FUNDS even if error_reason is generic", async () => {
+      const paymentId = `pay_rzp_iso51_${Date.now()}`;
+      const payload = {
+        entity: "event",
+        event: "payment.failed",
+        payload: {
+          payment: {
+            entity: {
+              id: paymentId,
+              entity: "payment",
+              amount: 100000,
+              currency: "INR",
+              status: "failed",
+              method: "credit_card",
+              error_code: "BAD_REQUEST_ERROR",
+              error_description: "Transaction failed",
+              acquirer_data: { response_code: "51" },
+              created_at: Math.floor(Date.now() / 1000),
+            },
+          },
+        },
+      };
+
+      const rawBody = JSON.stringify(payload);
+      const signature = crypto
+        .createHmac("sha256", TEST_WEBHOOK_SECRET)
+        .update(rawBody)
+        .digest("hex");
+
+      const res = await request(app)
+        .post(`/api/webhooks/razorpay?companyId=${testCompanyId}`)
+        .set("Content-Type", "application/json")
+        .set("X-Razorpay-Signature", signature)
+        .send(rawBody);
+
+      expect(res.status).toBe(200);
+
+      const dbPayment = await prisma.paymentEvent.findFirst({
+        where: { externalPaymentId: paymentId },
+        include: { failure: true, assessment: true },
+      });
+
+      expect(dbPayment?.paymentMethod).toBe("CARD");
+      expect(dbPayment?.failure?.category).toBe("INSUFFICIENT_FUNDS");
+      expect(dbPayment?.assessment?.worthiness).toBe("RECOVER");
+    });
+
+    it("correctly classifies UPI collect request expiry as CUSTOMER_ACTION_REQUIRED", async () => {
+      const paymentId = `pay_rzp_collect_exp_${Date.now()}`;
+      const payload = {
+        entity: "event",
+        event: "payment.failed",
+        payload: {
+          payment: {
+            entity: {
+              id: paymentId,
+              entity: "payment",
+              amount: 15000,
+              currency: "INR",
+              status: "failed",
+              method: "upi",
+              error_code: "BAD_REQUEST_ERROR",
+              error_description: "Collect request expired by customer",
+              error_source: "customer",
+              error_reason: "collect_request_expired",
+              created_at: Math.floor(Date.now() / 1000),
+            },
+          },
+        },
+      };
+
+      const rawBody = JSON.stringify(payload);
+      const signature = crypto
+        .createHmac("sha256", TEST_WEBHOOK_SECRET)
+        .update(rawBody)
+        .digest("hex");
+
+      const res = await request(app)
+        .post(`/api/webhooks/razorpay?companyId=${testCompanyId}`)
+        .set("Content-Type", "application/json")
+        .set("X-Razorpay-Signature", signature)
+        .send(rawBody);
+
+      expect(res.status).toBe(200);
+
+      const dbPayment = await prisma.paymentEvent.findFirst({
+        where: { externalPaymentId: paymentId },
+        include: { failure: true },
+      });
+
+      expect(dbPayment?.failure?.category).toBe("CUSTOMER_ACTION_REQUIRED");
+    });
+  });
 });
+
 

@@ -56,8 +56,13 @@ export function errorHandlerMiddleware(
     return;
   }
 
-  // 3. Known Business Not Found
-  if (error instanceof Error && error.message.includes("not found")) {
+  // 3. Known Business Not Found (excluding internal Prisma Transaction errors)
+  if (
+    error instanceof Error &&
+    error.message.toLowerCase().includes("not found") &&
+    !error.message.includes("Transaction not found") &&
+    !("code" in error && typeof (error as { code: unknown }).code === "string" && (error as { code: string }).code.startsWith("P"))
+  ) {
     res.status(404).json({
       success: false,
       error: error.message,
@@ -65,6 +70,7 @@ export function errorHandlerMiddleware(
     });
     return;
   }
+
 
   // 4. Safe Production Fallback (never leak Prisma/SQL/Env details)
   res.status(500).json({

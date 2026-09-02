@@ -115,11 +115,37 @@ export class RazorpayWebhookController {
         return;
       }
 
-      // 4. Resolve Tenant Company Context
+      // 4. Extract and Sanitize Entities & Notes
+      const paymentEntity = req.body?.payload?.payment?.entity;
+      const orderEntity = req.body?.payload?.order?.entity;
+      const paymentLinkEntity = req.body?.payload?.payment_link?.entity;
+      const eventName = req.body?.event as string;
+
+      function sanitizeNotes(val: unknown): Record<string, unknown> {
+        if (!val) return {};
+        if (Array.isArray(val)) return {};
+        if (typeof val === "object") return val as Record<string, unknown>;
+        return {};
+      }
+
+      const paymentNotes = sanitizeNotes(paymentEntity?.notes);
+      const orderNotes = sanitizeNotes(orderEntity?.notes);
+      const linkNotes = sanitizeNotes(paymentLinkEntity?.notes);
+      const notes = { ...linkNotes, ...orderNotes, ...paymentNotes };
+
+      // Ensure entity notes are sanitized if empty array was received
+      if (paymentEntity && (Array.isArray(paymentEntity.notes) || !paymentEntity.notes)) {
+        paymentEntity.notes = notes;
+      }
+      if (orderEntity && (Array.isArray(orderEntity.notes) || !orderEntity.notes)) {
+        orderEntity.notes = orderNotes;
+      }
+
+      // 5. Resolve Tenant Company Context
       const companyId = (
         (req.query.companyId as string) ||
-        (req.body?.payload?.payment?.entity?.notes?.company_id as string) ||
-        (req.body?.payload?.payment?.entity?.notes?.companyId as string) ||
+        (notes.company_id as string) ||
+        (notes.companyId as string) ||
         req.tenant?.companyId ||
         "demo_company_001"
       ).trim();
@@ -138,7 +164,7 @@ export class RazorpayWebhookController {
         });
       }
 
-      // 5. Resolve or Register Razorpay Provider in DB
+      // 6. Resolve or Register Razorpay Provider in DB
       let provider = await prisma.provider.findFirst({
         where: { type: "RAZORPAY" },
       });
@@ -153,24 +179,34 @@ export class RazorpayWebhookController {
         });
       }
 
-      // 6. Check for Recovery Confirmation (e.g. payment.captured for a recovery attempt)
-      const paymentEntity = req.body?.payload?.payment?.entity;
-      const orderEntity = req.body?.payload?.order?.entity;
-      const paymentLinkEntity = req.body?.payload?.payment_link?.entity;
-      const notes = paymentEntity?.notes || orderEntity?.notes || paymentLinkEntity?.notes;
-      const eventName = req.body?.event as string;
+      // 7. Check for Recovery Confirmation (e.g. payment.captured for a recovery attempt)
+      const confirmedAmount = paymentEntity
+        ? Number((paymentEntity.amount / 100).toFixed(2))
+        : orderEntity
+        ? Number(((orderEntity.amount_paid || orderEntity.amount) / 100).toFixed(2))
+        : 0;
+
+      const providerPaymentId =
+        paymentEntity?.id || orderEntity?.id || paymentLinkEntity?.id || "unknown";
 
       const recoveryResult = await this.recoveryExecutionService.confirmRecoveryFromProvider({
         companyId: company.id,
-        providerPaymentId: paymentEntity?.id || orderEntity?.id || paymentLinkEntity?.id || "unknown",
-        confirmedAmount: paymentEntity ? Number((paymentEntity.amount / 100).toFixed(2)) : 0,
-        currency: paymentEntity?.currency || "INR",
+        providerPaymentId,
+        confirmedAmount,
+        currency: paymentEntity?.currency || orderEntity?.currency || "INR",
         event: eventName,
-        recoveryAttemptId: notes?.recoveryAttemptId,
-        paymentEventId: notes?.paymentEventId,
-        originalExternalPaymentId: notes?.originalExternalPaymentId || notes?.originalPaymentId,
-        providerReference: paymentEntity?.order_id || paymentLinkEntity?.id || paymentEntity?.id,
-        notes: `Razorpay webhook: ${eventName} (${paymentEntity?.id || "N/A"})`,
+        recoveryAttemptId: (notes.recoveryAttemptId as string) || undefined,
+        paymentEventId: (notes.paymentEventId as string) || undefined,
+        originalExternalPaymentId:
+          (notes.originalExternalPaymentId as string) ||
+          (notes.originalPaymentId as string) ||
+          undefined,
+        providerReference:
+          paymentLinkEntity?.id ||
+          paymentEntity?.order_id ||
+          orderEntity?.id ||
+          paymentEntity?.id,
+        notes: `Razorpay webhook: ${eventName} (${providerPaymentId})`,
       });
 
       if (recoveryResult.isRecovery) {
@@ -187,11 +223,29 @@ export class RazorpayWebhookController {
         return;
       }
 
-      // 7. Normalize Razorpay Webhook Payload to CanonicalPaymentEvent
-      const canonicalEvent = this.adapter.normalize(req.body, {
+      // 8. Normalize Razorpay Webhook Payload to CanonicalPaymentEvent
+      let entityToNormalize: unknown = paymentEntity;
+      if (!entityToNormalize && orderEntity) {
+        entityToNormalize = {
+          id: orderEntity.id,
+          entity: "payment",
+          amount: orderEntity.amount_paid ?? orderEntity.amount,
+          currency: orderEntity.currency || "INR",
+          status: "captured",
+          order_id: orderEntity.id,
+          method: "other",
+          notes,
+          created_at: orderEntity.created_at || Math.floor(Date.now() / 1000),
+        };
+      }
+
+      const canonicalEvent = this.adapter.normalize(entityToNormalize || req.body, {
         companyId: company.id,
         providerId: provider.id,
+        eventName,
+        accountId: req.body?.account_id,
       });
+
 
       // 8. Dispatch through Existing Core Payment Pipeline
       const result = await this.pipelineService.processEvent(canonicalEvent);
