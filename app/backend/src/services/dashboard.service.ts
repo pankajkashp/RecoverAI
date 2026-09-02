@@ -63,7 +63,7 @@ export class DashboardService {
   async getDashboardSummary(companyId?: string): Promise<DashboardSummaryResponse> {
     const company = await this.resolveCompany(companyId);
 
-    // 1. Fetch all 14 summary metrics concurrently in a single Promise.all
+    // 1. Fetch summary metrics concurrently in a single Promise.all
     const [
       totalPayments,
       failedPayments,
@@ -79,25 +79,27 @@ export class DashboardService {
       doNotRecoverCount,
       reviewCount,
       failedOutcomeCount,
+      btTotalSum,
+      btPotRecoverableSum,
     ] = await Promise.all([
-      // 1. Total payments count
+      // 1. Total payments count (attempts)
       this.prisma.paymentEvent.count({
         where: { companyId: company.id },
       }),
-      // 2. Failed payments count
+      // 2. Failed payments count (attempts)
       this.prisma.paymentEvent.count({
         where: { companyId: company.id, status: "FAILED" },
       }),
-      // 3. Completed payments count
+      // 3. Completed payments count (attempts)
       this.prisma.paymentEvent.count({
         where: { companyId: company.id, status: "COMPLETED" },
       }),
-      // 4. Total payments monetary sum
+      // 4. Total payments monetary sum (legacy fallback)
       this.prisma.paymentEvent.aggregate({
         where: { companyId: company.id },
         _sum: { amount: true },
       }),
-      // 5. Potentially recoverable sum (FAILED with worthiness RECOVER)
+      // 5. Potentially recoverable sum (legacy fallback)
       this.prisma.paymentEvent.aggregate({
         where: {
           companyId: company.id,
@@ -164,7 +166,22 @@ export class DashboardService {
           outcome: "FAILED",
         },
       }),
+      // 15. Total BusinessTransactions count and monetary sum (prevents multiplying volume by attempts)
+      this.prisma.businessTransaction.aggregate({
+        where: { companyId: company.id },
+        _sum: { amount: true },
+        _count: { id: true },
+      }),
+      // 16. Potentially recoverable sum from unresolved FAILED business transactions
+      this.prisma.businessTransaction.aggregate({
+        where: {
+          companyId: company.id,
+          status: "FAILED",
+        },
+        _sum: { amount: true },
+      }),
     ]);
+
 
     const failureBreakdown: FailureBreakdownItem[] = failureGroups.map((g) => {
       const count = g._count.category;
@@ -223,9 +240,17 @@ export class DashboardService {
         ? Number(((failedPayments / totalPayments) * 100).toFixed(1))
         : 0;
 
-    const potRecoverableNum = potentiallyRecoverableSum._sum.amount
-      ? Number(potentiallyRecoverableSum._sum.amount)
-      : 0;
+    const totalPaymentValue =
+      btTotalSum._count.id > 0
+        ? (btTotalSum._sum.amount ?? 0).toString()
+        : (totalPaymentSum._sum.amount ?? 0).toString();
+
+    const potentiallyRecoverableAmount =
+      btTotalSum._count.id > 0
+        ? (btPotRecoverableSum._sum.amount ?? 0).toString()
+        : (potentiallyRecoverableSum._sum.amount ?? 0).toString();
+
+    const potRecoverableNum = Number(potentiallyRecoverableAmount);
     const actRecoveredNum = actualRecoveredSum._sum.actualRecoveredAmount
       ? Number(actualRecoveredSum._sum.actualRecoveredAmount)
       : 0;
@@ -247,16 +272,15 @@ export class DashboardService {
         failedPayments,
         successfulPayments,
         failureRate,
-        totalPaymentValue: (totalPaymentSum._sum.amount ?? 0).toString(),
-        potentiallyRecoverableAmount: (
-          potentiallyRecoverableSum._sum.amount ?? 0
-        ).toString(),
+        totalPaymentValue,
+        potentiallyRecoverableAmount,
         estimatedRecoverableAmount: (
           estimatedRecoverableSum._sum.estimatedRecoverableAmount ?? 0
         ).toString(),
         actualRecoveredAmount: (
           actualRecoveredSum._sum.actualRecoveredAmount ?? 0
         ).toString(),
+
         recoveryRate,
         recommendedCount,
         attemptedCount,
@@ -348,6 +372,8 @@ export class DashboardService {
           externalPaymentId: true,
           companyId: true,
           providerId: true,
+          businessTransactionId: true,
+          orderReference: true,
           customerReference: true,
           amount: true,
           currency: true,
@@ -422,10 +448,13 @@ export class DashboardService {
         companyId: record.companyId,
         providerId: record.providerId,
         providerType: record.provider.type,
+        businessTransactionId: record.businessTransactionId,
+        orderReference: record.orderReference,
         customerReference: record.customerReference,
         amount: record.amount.toString(),
         currency: record.currency,
         status: record.status,
+
         paymentMethod: record.paymentMethod,
         eventType: record.eventType,
         failureCode: record.failureCode,

@@ -38,7 +38,14 @@ export const DemoRawPaymentEventSchema = z
     customer_reference: z.string().nullish(),
     customerReference: z.string().nullish(),
 
+    order_reference: z.string().nullish(),
+    orderReference: z.string().nullish(),
+
+    merchant_transaction_reference: z.string().nullish(),
+    merchantTransactionReference: z.string().nullish(),
+
     // Financial
+
     amount: z.coerce.number().positive("amount must be a positive number"),
     currency: z.string().min(3).max(3).default("INR"),
 
@@ -150,9 +157,18 @@ export class DemoAdapter implements IProviderAdapter<DemoRawPaymentEvent | unkno
       adapter: "DemoAdapter",
     };
 
+    const orderReference =
+      parsed.orderReference ?? parsed.order_reference ?? null;
+    const merchantTransactionReference =
+      parsed.merchantTransactionReference ??
+      parsed.merchant_transaction_reference ??
+      null;
+
     // Construct and validate canonical event
     return CanonicalPaymentEventSchema.parse({
       externalPaymentId,
+      orderReference,
+      merchantTransactionReference,
       companyId,
       providerId,
       customerReference,
@@ -167,6 +183,7 @@ export class DemoAdapter implements IProviderAdapter<DemoRawPaymentEvent | unkno
       eventTimestamp,
       metadata,
     });
+
   }
 }
 

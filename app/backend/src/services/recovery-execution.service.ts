@@ -113,7 +113,71 @@ export class RecoveryExecutionService {
       throw new IneligibleRecoveryError(action);
     }
 
-    // 5. Idempotency Check: Prevent duplicate executions for the same payment event
+    // 5. Idempotency Check: Prevent duplicate executions for the same payment event or business transaction
+    if (payment.businessTransactionId) {
+      const businessTransaction = await this.db.businessTransaction.findUnique({
+        where: { id: payment.businessTransactionId },
+      });
+
+      if (
+        businessTransaction &&
+        (businessTransaction.status === "SUCCESSFUL" ||
+          businessTransaction.status === "RECOVERED")
+      ) {
+        return {
+          status: "ALREADY_EXECUTED",
+          isExecuted: false,
+          recoveryAttemptId: "tx_already_settled",
+          paymentEventId: payment.id,
+          recommendationId: recommendation.id,
+          recommendationAction: action,
+          attemptStatus: "SUCCESSFUL",
+          outcomeStatus: "SUCCESSFUL",
+          actualRecoveredAmount: businessTransaction.amount.toString(),
+          estimatedRecoverableAmount:
+            assessment?.estimatedRecoverableAmount?.toString() ?? null,
+          isDemoSandbox: true,
+          message:
+            "Business transaction has already been successfully recovered or completed. Additional recovery attempts are prevented.",
+        };
+      }
+
+      // Check if an open recovery attempt already exists for this business transaction
+      const existingTxAttempt = await this.db.recoveryAttempt.findFirst({
+        where: {
+          paymentEvent: { businessTransactionId: payment.businessTransactionId },
+          status: "ATTEMPTED",
+        },
+        include: { outcome: true },
+        orderBy: { createdAt: "desc" },
+      });
+
+      if (existingTxAttempt) {
+        return {
+          status: "ALREADY_EXECUTED",
+          isExecuted: false,
+          recoveryAttemptId: existingTxAttempt.id,
+          recoveryOutcomeId: existingTxAttempt.outcome?.id,
+          paymentEventId: payment.id,
+          recommendationId: recommendation.id,
+          recommendationAction: action,
+          attemptStatus: existingTxAttempt.status,
+          outcomeStatus: existingTxAttempt.outcome
+            ? existingTxAttempt.outcome.outcome
+            : "NOT_ATTEMPTED",
+          actualRecoveredAmount:
+            existingTxAttempt.outcome?.actualRecoveredAmount?.toString() ?? null,
+          estimatedRecoverableAmount:
+            assessment?.estimatedRecoverableAmount?.toString() ?? null,
+          isDemoSandbox: true,
+          message:
+            "Recovery is already pending for this business transaction. Existing attempt preserved (idempotent).",
+          checkoutUrl: existingTxAttempt.checkoutUrl,
+          providerReference: existingTxAttempt.providerReference,
+        };
+      }
+    }
+
     const existingAttempt = await this.db.recoveryAttempt.findFirst({
       where: { paymentEventId: payment.id },
       include: { outcome: true },
@@ -145,6 +209,7 @@ export class RecoveryExecutionService {
         providerReference: existingAttempt.providerReference,
       };
     }
+
 
     // 6. Construct Canonical Event representation for the adapter
     const canonicalEvent: CanonicalPaymentEvent =
@@ -380,8 +445,26 @@ export class RecoveryExecutionService {
         },
       });
 
+      // Update parent BusinessTransaction if present
+      if (isSuccess && matchedAttempt.paymentEvent.businessTransactionId) {
+        const bt = await tx.businessTransaction.findUnique({
+          where: { id: matchedAttempt.paymentEvent.businessTransactionId },
+        });
+
+        if (bt && bt.status !== "SUCCESSFUL" && bt.status !== "RECOVERED") {
+          await tx.businessTransaction.update({
+            where: { id: bt.id },
+            data: {
+              status: "RECOVERED",
+              recoveryAttribution: "RECOVERAI",
+            },
+          });
+        }
+      }
+
       return { attempt: updatedAttempt, outcome };
     });
+
 
     return {
       isRecovery: true,

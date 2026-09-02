@@ -125,9 +125,13 @@ export class RazorpayRecoveryAdapter implements IRecoveryProviderAdapter {
               companyId: event.companyId,
               paymentEventId: event.externalPaymentId,
               originalExternalPaymentId: event.externalPaymentId,
+              orderReference: event.orderReference || undefined,
+              merchantTransactionReference:
+                event.merchantTransactionReference || undefined,
               providerId: event.providerId,
               action: recommendation.action,
             },
+
           }),
         });
 

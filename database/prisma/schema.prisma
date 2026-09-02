@@ -102,6 +102,21 @@ enum RecoveryAttemptStatus {
   UNKNOWN
 }
 
+enum BusinessTransactionStatus {
+  PENDING
+  FAILED
+  SUCCESSFUL
+  RECOVERED
+  PARTIALLY_REFUNDED
+  REFUNDED
+}
+
+enum RecoveryAttribution {
+  NONE
+  CUSTOMER
+  RECOVERAI
+}
+
 // ---------------------------------------------------------------------------
 // Models
 // ---------------------------------------------------------------------------
@@ -113,8 +128,9 @@ model Company {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  users    User[]
-  payments PaymentEvent[]
+  users                User[]
+  payments             PaymentEvent[]
+  businessTransactions BusinessTransaction[]
 
   @@map("companies")
 }
@@ -151,33 +167,64 @@ model Provider {
   @@map("providers")
 }
 
+/// A business transaction grouping one or more payment attempts across provider orders.
+model BusinessTransaction {
+  id                  String                    @id @default(cuid())
+  companyId           String                    @map("company_id")
+  merchantReference   String?                   @map("merchant_reference")
+  orderReference      String?                   @map("order_reference")
+  amount              Decimal                   @db.Decimal(12, 2)
+  currency            String                    @db.VarChar(3)
+  status              BusinessTransactionStatus @default(PENDING)
+  recoveryAttribution RecoveryAttribution       @default(NONE) @map("recovery_attribution")
+  customerReference   String?                   @map("customer_reference")
+  metadata            Json?
+  createdAt           DateTime                  @default(now()) @map("created_at")
+  updatedAt           DateTime                  @updatedAt @map("updated_at")
+
+  company  Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payments PaymentEvent[]
+
+
+  @@unique([companyId, merchantReference], name: "company_merchant_ref_unique")
+  @@index([companyId])
+  @@index([companyId, orderReference])
+  @@index([companyId, status])
+  @@index([orderReference])
+  @@map("business_transactions")
+}
+
 /// A canonical payment event — provider-independent.
 /// This is the contract between integrations and the RecoverAI core.
 model PaymentEvent {
-  id                String        @id @default(cuid())
-  externalPaymentId String        @map("external_payment_id")
-  companyId         String        @map("company_id")
-  providerId        String        @map("provider_id")
-  customerReference String?       @map("customer_reference")
-  amount            Decimal       @db.Decimal(12, 2)
-  currency          String        @db.VarChar(3)
-  status            PaymentStatus
-  paymentMethod     PaymentMethod @default(OTHER) @map("payment_method")
-  eventType         EventType     @map("event_type")
-  failureCode       String?       @map("failure_code")
-  failureMessage    String?       @map("failure_message")
-  eventTimestamp    DateTime      @map("event_timestamp")
-  metadata          Json?
-  createdAt         DateTime      @default(now()) @map("created_at")
-  updatedAt         DateTime      @updatedAt @map("updated_at")
+  id                    String        @id @default(cuid())
+  externalPaymentId     String        @map("external_payment_id")
+  companyId             String        @map("company_id")
+  providerId            String        @map("provider_id")
+  businessTransactionId String?       @map("business_transaction_id")
+  orderReference        String?       @map("order_reference")
+  customerReference     String?       @map("customer_reference")
+  amount                Decimal       @db.Decimal(12, 2)
+  currency              String        @db.VarChar(3)
+  status                PaymentStatus
+  paymentMethod         PaymentMethod @default(OTHER) @map("payment_method")
+  eventType             EventType     @map("event_type")
+  failureCode           String?       @map("failure_code")
+  failureMessage        String?       @map("failure_message")
+  eventTimestamp        DateTime      @map("event_timestamp")
+  metadata              Json?
+  createdAt             DateTime      @default(now()) @map("created_at")
+  updatedAt             DateTime      @updatedAt @map("updated_at")
 
-  company        Company                 @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  provider       Provider                @relation(fields: [providerId], references: [id], onDelete: Restrict)
-  failure        PaymentFailure?
-  assessment     RecoveryAssessment?
-  recommendation RecoveryRecommendation?
-  attempts       RecoveryAttempt[]
-  predictions    MlPrediction[]
+  company             Company                 @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  provider            Provider                @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  businessTransaction BusinessTransaction?    @relation(fields: [businessTransactionId], references: [id], onDelete: SetNull)
+
+  failure             PaymentFailure?
+  assessment          RecoveryAssessment?
+  recommendation      RecoveryRecommendation?
+  attempts            RecoveryAttempt[]
+  predictions         MlPrediction[]
 
   // Idempotency: prevent duplicate business records from the same provider event
   @@unique([providerId, externalPaymentId, companyId], name: "provider_external_company_unique")
@@ -188,8 +235,11 @@ model PaymentEvent {
   @@index([providerId])
   @@index([externalPaymentId])
   @@index([eventTimestamp])
+  @@index([businessTransactionId])
+  @@index([orderReference])
   @@map("payment_events")
 }
+
 
 /// Normalized payment failure information for a failed payment event.
 model PaymentFailure {

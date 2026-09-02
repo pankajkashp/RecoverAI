@@ -112,19 +112,52 @@ export const RecommendationStatusEnum = z.enum([
 ]);
 export type RecommendationStatus = z.infer<typeof RecommendationStatusEnum>;
 
+export const BusinessTransactionStatusEnum = z.enum([
+  "PENDING",
+  "FAILED",
+  "SUCCESSFUL",
+  "RECOVERED",
+  "PARTIALLY_REFUNDED",
+  "REFUNDED",
+]);
+export type BusinessTransactionStatus = z.infer<
+  typeof BusinessTransactionStatusEnum
+>;
+
+export const RecoveryAttributionEnum = z.enum([
+  "NONE",
+  "CUSTOMER",
+  "RECOVERAI",
+]);
+export type RecoveryAttribution = z.infer<typeof RecoveryAttributionEnum>;
+
 // ============================================================================
-// Canonical Payment Event Schema & Types
+// Core Canonical Event Contract
 // ============================================================================
 
+/**
+ * Canonical, normalized payment event across all payment providers.
+ * All providers (Demo, Razorpay, Stripe, etc.) MUST translate incoming
+ * events into this schema via their ProviderAdapter.
+ */
 export const CanonicalPaymentEventSchema = z.object({
   /**
-   * Provider-side / external payment or transaction identifier.
-   * e.g. "pay_demo_12345" or "pay_H123456789"
+   * Unique external payment identifier from the provider (e.g. "pay_ABC123").
    */
   externalPaymentId: z
     .string()
     .min(1, "externalPaymentId must not be empty")
     .trim(),
+
+  /**
+   * Optional provider order identifier (e.g. Razorpay order_id) that groups attempts.
+   */
+  orderReference: z.string().trim().nullish(),
+
+  /**
+   * Optional stable merchant/business transaction reference across provider orders.
+   */
+  merchantTransactionReference: z.string().trim().nullish(),
 
   /**
    * RecoverAI internal company identifier that owns this transaction.
@@ -314,10 +347,14 @@ export interface PaymentPipelineResult {
   externalPaymentId: string;
   companyId: string;
   providerId: string;
+  businessTransactionId?: string;
+  businessTransactionStatus?: BusinessTransactionStatus;
+  recoveryAttribution?: RecoveryAttribution;
   amount: string;
   currency: string;
   paymentStatus: PaymentStatus;
   message: string;
+
   failureAnalysis?: {
     category: FailureCategory;
     reason: string;
@@ -566,7 +603,10 @@ export const PaymentLifecycleItemSchema = z.object({
   companyId: z.string(),
   providerId: z.string(),
   providerType: ProviderTypeEnum,
+  businessTransactionId: z.string().nullish(),
+  orderReference: z.string().nullish(),
   customerReference: z.string().nullable(),
+
   amount: z.string(),
   currency: z.string(),
   status: PaymentStatusEnum,

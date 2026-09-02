@@ -145,9 +145,27 @@ export class RazorpayProviderAdapter
       };
     }
 
+    const orderReference = paymentEntity.order_id?.trim() || null;
+
+
+    const merchantTransactionReference = (
+      (paymentEntity.notes?.transaction_id as string) ||
+      (paymentEntity.notes?.transactionId as string) ||
+      (paymentEntity.notes?.business_transaction_id as string) ||
+      (paymentEntity.notes?.businessTransactionId as string) ||
+      (paymentEntity.notes?.merchant_transaction_id as string) ||
+      (paymentEntity.notes?.merchantTransactionId as string) ||
+      (paymentEntity.notes?.merchant_order_id as string) ||
+      (paymentEntity.notes?.merchantOrderId as string) ||
+      (paymentEntity.notes?.receipt as string) ||
+      null
+    )?.trim() || null;
+
     // 11. Construct and validate CanonicalPaymentEvent
     return CanonicalPaymentEventSchema.parse({
       externalPaymentId,
+      orderReference,
+      merchantTransactionReference,
       companyId,
       providerId,
       customerReference,
@@ -162,6 +180,7 @@ export class RazorpayProviderAdapter
       eventTimestamp,
       metadata,
     });
+
   }
 
   private normalizeStatus(status: string): PaymentStatus {

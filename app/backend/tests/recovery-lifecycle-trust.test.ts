@@ -88,9 +88,13 @@ describe("Recovery Lifecycle & Critical Trust Invariant", () => {
       await prisma.paymentEvent.deleteMany({
         where: { companyId: cid },
       });
+      await prisma.businessTransaction.deleteMany({
+        where: { companyId: cid },
+      });
       await prisma.company.deleteMany({
         where: { id: cid },
       });
+
     }
     await prisma.$disconnect();
   });

@@ -61,7 +61,79 @@ export class PaymentPipelineService {
     });
 
     if (existing) {
-      // Fetch recommendation for duplicate response
+      // Check if this is a legitimate state transition (e.g. FAILED -> COMPLETED or PENDING -> COMPLETED)
+      if (existing.status !== event.status) {
+        const updated = await this.db.$transaction(async (tx) => {
+          const updPayment = await tx.paymentEvent.update({
+            where: { id: existing.id },
+            data: {
+              status: event.status,
+              eventType: event.eventType,
+              updatedAt: new Date(),
+            },
+          });
+
+          let btStatus: import("@prisma/client").BusinessTransactionStatus | undefined;
+          let btAttribution: import("@prisma/client").RecoveryAttribution | undefined;
+
+          if (updPayment.businessTransactionId) {
+            const bt = await tx.businessTransaction.findUnique({
+              where: { id: updPayment.businessTransactionId },
+            });
+
+            if (bt) {
+              if (event.status === "COMPLETED") {
+                if (bt.status !== "SUCCESSFUL" && bt.status !== "RECOVERED") {
+                  const updatedBt = await tx.businessTransaction.update({
+                    where: { id: bt.id },
+                    data: {
+                      status: "RECOVERED",
+                      recoveryAttribution: "CUSTOMER",
+                    },
+                  });
+                  btStatus = updatedBt.status;
+                  btAttribution = updatedBt.recoveryAttribution;
+
+                  // Cancel open recovery attempts for this transaction
+                  await tx.recoveryAttempt.updateMany({
+                    where: {
+                      paymentEvent: { businessTransactionId: bt.id },
+                      status: "ATTEMPTED",
+                    },
+                    data: {
+                      status: "CANCELLED",
+                      completedAt: new Date(),
+                    },
+                  });
+                } else {
+                  btStatus = bt.status;
+                  btAttribution = bt.recoveryAttribution;
+                }
+              }
+            }
+          }
+
+          return { updPayment, btStatus, btAttribution };
+        });
+
+        return {
+          status: "CREATED",
+          isDuplicate: false,
+          paymentEventId: updated.updPayment.id,
+          externalPaymentId: updated.updPayment.externalPaymentId,
+          companyId: updated.updPayment.companyId,
+          providerId: updated.updPayment.providerId,
+          businessTransactionId: updated.updPayment.businessTransactionId || undefined,
+          businessTransactionStatus: updated.btStatus,
+          recoveryAttribution: updated.btAttribution,
+          amount: updated.updPayment.amount.toString(),
+          currency: updated.updPayment.currency,
+          paymentStatus: updated.updPayment.status,
+          message: `Payment status transitioned from ${existing.status} to ${event.status}.`,
+        };
+      }
+
+      // Exact same status: Idempotent duplicate
       const existingRec = await this.db.recoveryRecommendation.findUnique({
         where: { paymentEventId: existing.id },
       });
@@ -73,6 +145,7 @@ export class PaymentPipelineService {
         externalPaymentId: existing.externalPaymentId,
         companyId: existing.companyId,
         providerId: existing.providerId,
+        businessTransactionId: existing.businessTransactionId || undefined,
         amount: existing.amount.toString(),
         currency: existing.currency,
         paymentStatus: existing.status,
@@ -153,14 +226,117 @@ export class PaymentPipelineService {
           )
         : null;
 
-    // 5. Persist Payment Event, PaymentFailure, and RecoveryAssessment in a Transaction
+    // 5. Persist Payment Event, BusinessTransaction, PaymentFailure, and RecoveryAssessment in a Transaction
     try {
       const created = await this.db.$transaction(async (tx) => {
+        // Resolve or create BusinessTransaction
+        let businessTransaction = null;
+
+        // Priority 1: Match by merchantReference within company
+        if (event.merchantTransactionReference) {
+          businessTransaction = await tx.businessTransaction.findUnique({
+            where: {
+              company_merchant_ref_unique: {
+                companyId: event.companyId,
+                merchantReference: event.merchantTransactionReference,
+              },
+            },
+          });
+        }
+
+        // Priority 2: Match by orderReference within company
+        if (!businessTransaction && event.orderReference) {
+          businessTransaction = await tx.businessTransaction.findFirst({
+            where: {
+              companyId: event.companyId,
+              orderReference: event.orderReference,
+            },
+          });
+        }
+
+        const isPaymentSuccess = event.status === "COMPLETED";
+
+        if (!businessTransaction) {
+          businessTransaction = await tx.businessTransaction.create({
+            data: {
+              companyId: event.companyId,
+              merchantReference: event.merchantTransactionReference || null,
+              orderReference: event.orderReference || null,
+              amount: new Prisma.Decimal(event.amount),
+              currency: event.currency,
+              status: isPaymentSuccess
+                ? "SUCCESSFUL"
+                : event.status === "FAILED"
+                ? "FAILED"
+                : "PENDING",
+              customerReference: event.customerReference || null,
+              recoveryAttribution: "NONE",
+              metadata: event.metadata
+                ? (event.metadata as Prisma.InputJsonValue)
+                : Prisma.JsonNull,
+            },
+          });
+        } else {
+          // Existing BusinessTransaction found!
+          if (isPaymentSuccess) {
+            // Customer or RecoverAI succeeded on this attempt!
+            if (
+              businessTransaction.status === "FAILED" ||
+              businessTransaction.status === "PENDING"
+            ) {
+              const meta = event.metadata as Record<string, unknown> | undefined;
+              const metaNotes = meta?.notes as Record<string, unknown> | undefined;
+              const isRecoverAiAttribution = Boolean(
+                metaNotes?.recoveryAttemptId ||
+                  meta?.recoveryAttemptId ||
+                  meta?.action === "RETRY_PAYMENT"
+              );
+
+              businessTransaction = await tx.businessTransaction.update({
+                where: { id: businessTransaction.id },
+                data: {
+                  status: "RECOVERED",
+                  recoveryAttribution: isRecoverAiAttribution
+                    ? "RECOVERAI"
+                    : "CUSTOMER",
+                },
+              });
+
+              // Cancel any pending recovery attempts for earlier attempts in this transaction
+              await tx.recoveryAttempt.updateMany({
+                where: {
+                  paymentEvent: { businessTransactionId: businessTransaction.id },
+                  status: "ATTEMPTED",
+                },
+                data: {
+                  status: "CANCELLED",
+                  completedAt: new Date(),
+                },
+              });
+            }
+          } else if (event.status === "FAILED") {
+            // If already successful or recovered, do not downgrade business transaction
+            if (
+              businessTransaction.status !== "SUCCESSFUL" &&
+              businessTransaction.status !== "RECOVERED"
+            ) {
+              businessTransaction = await tx.businessTransaction.update({
+                where: { id: businessTransaction.id },
+                data: {
+                  status: "FAILED",
+                },
+              });
+            }
+          }
+        }
+
         const paymentRecord = await tx.paymentEvent.create({
           data: {
             externalPaymentId: event.externalPaymentId,
             companyId: event.companyId,
             providerId: event.providerId,
+            businessTransactionId: businessTransaction.id,
+            orderReference: event.orderReference || null,
             customerReference: event.customerReference || null,
             amount: new Prisma.Decimal(event.amount),
             currency: event.currency,
@@ -174,7 +350,9 @@ export class PaymentPipelineService {
               ? failureAnalysis.reason
               : event.failureMessage || null,
             eventTimestamp: new Date(event.eventTimestamp),
-            metadata: event.metadata ? (event.metadata as Prisma.InputJsonValue) : Prisma.JsonNull,
+            metadata: event.metadata
+              ? (event.metadata as Prisma.InputJsonValue)
+              : Prisma.JsonNull,
           },
         });
 
@@ -184,15 +362,20 @@ export class PaymentPipelineService {
             data: {
               paymentEventId: paymentRecord.id,
               category: failureAnalysis.category,
-              failureCode: failureAnalysis.originalFailureCode || event.failureCode || null,
+              failureCode:
+                failureAnalysis.originalFailureCode || event.failureCode || null,
               failureMessage: failureAnalysis.reason,
               failedAt: new Date(event.eventTimestamp),
             },
           });
         }
 
-        // Persist RecoveryAssessment record when payment is failed
-        if (recoveryAssessment) {
+        // Only persist assessment and recommendation if transaction is not already resolved
+        const isTxResolved =
+          businessTransaction.status === "SUCCESSFUL" ||
+          businessTransaction.status === "RECOVERED";
+
+        if (recoveryAssessment && !isTxResolved) {
           await tx.recoveryAssessment.create({
             data: {
               paymentEventId: paymentRecord.id,
@@ -207,15 +390,11 @@ export class PaymentPipelineService {
           });
         }
 
-        // Phase 7: Persist RecoveryRecommendation record
-        if (recommendation) {
+        if (recommendation && !isTxResolved) {
           await tx.recoveryRecommendation.create({
             data: {
               paymentEventId: paymentRecord.id,
               action: recommendation.action,
-              // Cast status string to Prisma enum type.
-              // The recommendation service always produces 'RECOMMENDED' as initial status.
-              // Full lifecycle transitions (ACCEPTED, REJECTED, etc.) belong to Phase 8.
               status: recommendation.status as import("@prisma/client").RecommendationStatus,
               reason: recommendation.reason,
               confidence: recommendation.confidence,
@@ -223,7 +402,7 @@ export class PaymentPipelineService {
           });
         }
 
-        return paymentRecord;
+        return { paymentRecord, businessTransaction };
       }, {
         timeout: 30000,
         maxWait: 15000,
@@ -232,13 +411,16 @@ export class PaymentPipelineService {
       return {
         status: "CREATED",
         isDuplicate: false,
-        paymentEventId: created.id,
-        externalPaymentId: created.externalPaymentId,
-        companyId: created.companyId,
-        providerId: created.providerId,
-        amount: created.amount.toString(),
-        currency: created.currency,
-        paymentStatus: created.status,
+        paymentEventId: created.paymentRecord.id,
+        externalPaymentId: created.paymentRecord.externalPaymentId,
+        companyId: created.paymentRecord.companyId,
+        providerId: created.paymentRecord.providerId,
+        businessTransactionId: created.paymentRecord.businessTransactionId || undefined,
+        businessTransactionStatus: created.businessTransaction.status,
+        recoveryAttribution: created.businessTransaction.recoveryAttribution,
+        amount: created.paymentRecord.amount.toString(),
+        currency: created.paymentRecord.currency,
+        paymentStatus: created.paymentRecord.status,
         message: "Canonical payment event successfully validated and persisted.",
         failureAnalysis: failureAnalysis
           ? {
@@ -269,6 +451,7 @@ export class PaymentPipelineService {
             }
           : undefined,
       };
+
     } catch (err: unknown) {
       // Safe race-condition idempotency handler: if concurrent duplicate triggered P2002
       if (
@@ -298,8 +481,10 @@ export class PaymentPipelineService {
             externalPaymentId: duplicate.externalPaymentId,
             companyId: duplicate.companyId,
             providerId: duplicate.providerId,
+            businessTransactionId: duplicate.businessTransactionId || undefined,
             amount: duplicate.amount.toString(),
             currency: duplicate.currency,
+
             paymentStatus: duplicate.status,
             message: "Concurrent duplicate payment event detected. Existing record preserved.",
             failureAnalysis: duplicate.failure
