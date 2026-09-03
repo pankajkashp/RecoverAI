@@ -189,6 +189,10 @@ export class RazorpayWebhookController {
       const providerPaymentId =
         paymentEntity?.id || orderEntity?.id || paymentLinkEntity?.id || "unknown";
 
+      const paymentLinkId =
+        paymentLinkEntity?.id ||
+        (paymentEntity?.invoice_id?.startsWith("plink_") ? paymentEntity.invoice_id : undefined);
+
       const recoveryResult = await this.recoveryExecutionService.confirmRecoveryFromProvider({
         companyId: company.id,
         providerPaymentId,
@@ -202,12 +206,17 @@ export class RazorpayWebhookController {
           (notes.originalPaymentId as string) ||
           undefined,
         providerReference:
-          paymentLinkEntity?.id ||
+          paymentLinkId ||
+          paymentEntity?.invoice_id ||
           paymentEntity?.order_id ||
           orderEntity?.id ||
           paymentEntity?.id,
+        invoiceId: paymentEntity?.invoice_id || undefined,
+        orderId: paymentEntity?.order_id || orderEntity?.id || undefined,
+        paymentLinkId,
         notes: `Razorpay webhook: ${eventName} (${providerPaymentId})`,
       });
+
 
       if (recoveryResult.isRecovery) {
         res.status(200).json({

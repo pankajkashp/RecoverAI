@@ -93,18 +93,6 @@ export class PaymentPipelineService {
                   });
                   btStatus = updatedBt.status;
                   btAttribution = updatedBt.recoveryAttribution;
-
-                  // Cancel open recovery attempts for this transaction
-                  await tx.recoveryAttempt.updateMany({
-                    where: {
-                      paymentEvent: { businessTransactionId: bt.id },
-                      status: "ATTEMPTED",
-                    },
-                    data: {
-                      status: "CANCELLED",
-                      completedAt: new Date(),
-                    },
-                  });
                 } else {
                   btStatus = bt.status;
                   btAttribution = bt.recoveryAttribution;
@@ -299,18 +287,6 @@ export class PaymentPipelineService {
                   recoveryAttribution: isRecoverAiAttribution
                     ? "RECOVERAI"
                     : "CUSTOMER",
-                },
-              });
-
-              // Cancel any pending recovery attempts for earlier attempts in this transaction
-              await tx.recoveryAttempt.updateMany({
-                where: {
-                  paymentEvent: { businessTransactionId: businessTransaction.id },
-                  status: "ATTEMPTED",
-                },
-                data: {
-                  status: "CANCELLED",
-                  completedAt: new Date(),
                 },
               });
             }

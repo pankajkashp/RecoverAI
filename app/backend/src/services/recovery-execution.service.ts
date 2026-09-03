@@ -124,21 +124,171 @@ export class RecoveryExecutionService {
         (businessTransaction.status === "SUCCESSFUL" ||
           businessTransaction.status === "RECOVERED")
       ) {
+        // Look for any existing recovery attempt for this business transaction or payment
+        const existingTxAttempt = await this.db.recoveryAttempt.findFirst({
+          where: {
+            OR: [
+              { paymentEventId: payment.id },
+              { paymentEvent: { businessTransactionId: payment.businessTransactionId } },
+            ],
+          },
+          include: { outcome: true },
+          orderBy: { createdAt: "desc" },
+        });
+
+        // Persist SUCCESSFUL status and outcome to PostgreSQL
+        if (
+          existingTxAttempt &&
+          (!existingTxAttempt.outcome ||
+            existingTxAttempt.outcome.outcome !== "SUCCESSFUL" ||
+            existingTxAttempt.status !== "SUCCESSFUL")
+        ) {
+          const { attempt, outcome } = await this.db.$transaction(async (tx) => {
+            const updAttempt = await tx.recoveryAttempt.update({
+              where: { id: existingTxAttempt.id },
+              data: {
+                status: "SUCCESSFUL",
+                completedAt: new Date(),
+              },
+            });
+
+            const recOutcome = await tx.recoveryOutcome.upsert({
+              where: { recoveryAttemptId: existingTxAttempt.id },
+              create: {
+                recoveryAttemptId: existingTxAttempt.id,
+                paymentEventId: existingTxAttempt.paymentEventId,
+                outcome: "SUCCESSFUL",
+                actualRecoveredAmount: businessTransaction.amount,
+                outcomeTimestamp: new Date(),
+                notes: `Recovery confirmed via settled transaction (${businessTransaction.id}).`,
+              },
+              update: {
+                outcome: "SUCCESSFUL",
+                actualRecoveredAmount: businessTransaction.amount,
+                outcomeTimestamp: new Date(),
+                notes: `Recovery confirmed via settled transaction (${businessTransaction.id}).`,
+              },
+            });
+
+            await tx.businessTransaction.update({
+              where: { id: businessTransaction.id },
+              data: {
+                status: "RECOVERED",
+                recoveryAttribution: "RECOVERAI",
+              },
+            });
+
+            await tx.recoveryRecommendation.update({
+              where: { id: recommendation.id },
+              data: { status: "EXECUTED" },
+            });
+
+            return { attempt: updAttempt, outcome: recOutcome };
+          });
+
+          return {
+            status: "ALREADY_EXECUTED",
+            isExecuted: false,
+            recoveryAttemptId: attempt.id,
+            recoveryOutcomeId: outcome.id,
+            paymentEventId: payment.id,
+            recommendationId: recommendation.id,
+            recommendationAction: action,
+            attemptStatus: attempt.status,
+            outcomeStatus: outcome.outcome,
+            actualRecoveredAmount:
+              outcome.actualRecoveredAmount?.toString() ??
+              businessTransaction.amount.toString(),
+            estimatedRecoverableAmount:
+              assessment?.estimatedRecoverableAmount?.toString() ?? null,
+            isDemoSandbox: true,
+            message:
+              "Business transaction has already been successfully recovered. Existing attempt confirmed and preserved in database.",
+            checkoutUrl: attempt.checkoutUrl,
+            providerReference: attempt.providerReference,
+          };
+        } else if (existingTxAttempt) {
+          return {
+            status: "ALREADY_EXECUTED",
+            isExecuted: false,
+            recoveryAttemptId: existingTxAttempt.id,
+            recoveryOutcomeId: existingTxAttempt.outcome?.id,
+            paymentEventId: payment.id,
+            recommendationId: recommendation.id,
+            recommendationAction: action,
+            attemptStatus: existingTxAttempt.status,
+            outcomeStatus: existingTxAttempt.outcome?.outcome ?? "SUCCESSFUL",
+            actualRecoveredAmount:
+              existingTxAttempt.outcome?.actualRecoveredAmount?.toString() ??
+              businessTransaction.amount.toString(),
+            estimatedRecoverableAmount:
+              assessment?.estimatedRecoverableAmount?.toString() ?? null,
+            isDemoSandbox: true,
+            message:
+              "Business transaction has already been successfully recovered. Existing state preserved (idempotent).",
+            checkoutUrl: existingTxAttempt.checkoutUrl,
+            providerReference: existingTxAttempt.providerReference,
+          };
+        }
+
+        // If no attempt existed, persist new successful attempt and outcome
+        const { attempt, outcome } = await this.db.$transaction(async (tx) => {
+          const createdAttempt = await tx.recoveryAttempt.create({
+            data: {
+              paymentEventId: payment.id,
+              status: "SUCCESSFUL",
+              attemptedAt: new Date(),
+              completedAt: new Date(),
+            },
+          });
+
+          const recOutcome = await tx.recoveryOutcome.create({
+            data: {
+              recoveryAttemptId: createdAttempt.id,
+              paymentEventId: payment.id,
+              outcome: "SUCCESSFUL",
+              actualRecoveredAmount: businessTransaction.amount,
+              outcomeTimestamp: new Date(),
+              notes: `Recovery confirmed via settled transaction (${businessTransaction.id}).`,
+            },
+          });
+
+          await tx.businessTransaction.update({
+            where: { id: businessTransaction.id },
+            data: {
+              status: "RECOVERED",
+              recoveryAttribution: "RECOVERAI",
+            },
+          });
+
+          await tx.recoveryRecommendation.update({
+            where: { id: recommendation.id },
+            data: { status: "EXECUTED" },
+          });
+
+          return { attempt: createdAttempt, outcome: recOutcome };
+        });
+
         return {
           status: "ALREADY_EXECUTED",
           isExecuted: false,
-          recoveryAttemptId: "tx_already_settled",
+          recoveryAttemptId: attempt.id,
+          recoveryOutcomeId: outcome.id,
           paymentEventId: payment.id,
           recommendationId: recommendation.id,
           recommendationAction: action,
-          attemptStatus: "SUCCESSFUL",
-          outcomeStatus: "SUCCESSFUL",
-          actualRecoveredAmount: businessTransaction.amount.toString(),
+          attemptStatus: attempt.status,
+          outcomeStatus: outcome.outcome,
+          actualRecoveredAmount:
+            outcome.actualRecoveredAmount?.toString() ??
+            businessTransaction.amount.toString(),
           estimatedRecoverableAmount:
             assessment?.estimatedRecoverableAmount?.toString() ?? null,
           isDemoSandbox: true,
           message:
-            "Business transaction has already been successfully recovered or completed. Additional recovery attempts are prevented.",
+            "Business transaction has already been successfully recovered. Recovery attempt persisted to database.",
+          checkoutUrl: null,
+          providerReference: null,
         };
       }
 
@@ -350,6 +500,9 @@ export class RecoveryExecutionService {
     paymentEventId?: string;
     originalExternalPaymentId?: string;
     providerReference?: string;
+    invoiceId?: string;
+    orderId?: string;
+    paymentLinkId?: string;
     notes?: string;
   }): Promise<{
     isRecovery: boolean;
@@ -371,10 +524,15 @@ export class RecoveryExecutionService {
       orderBy: { createdAt: "desc" },
     });
 
-
-    const matchedAttempt = openAttempts.find((att) => {
+    let matchedAttempt = openAttempts.find((att) => {
       if (params.recoveryAttemptId && att.id === params.recoveryAttemptId) return true;
-      if (params.paymentEventId && att.paymentEventId === params.paymentEventId) return true;
+      if (
+        params.paymentEventId &&
+        (att.paymentEventId === params.paymentEventId ||
+          att.paymentEvent.externalPaymentId === params.paymentEventId)
+      ) {
+        return true;
+      }
       if (
         params.originalExternalPaymentId &&
         att.paymentEvent.externalPaymentId === params.originalExternalPaymentId
@@ -384,14 +542,115 @@ export class RecoveryExecutionService {
       if (params.providerReference && att.providerReference === params.providerReference) {
         return true;
       }
+      if (params.invoiceId && att.providerReference === params.invoiceId) {
+        return true;
+      }
+      if (params.paymentLinkId && att.providerReference === params.paymentLinkId) {
+        return true;
+      }
+      if (
+        params.orderId &&
+        (att.paymentEvent.orderReference === params.orderId ||
+          (att.metadata &&
+            typeof att.metadata === "object" &&
+            (att.metadata as Record<string, unknown>).orderId === params.orderId))
+      ) {
+        return true;
+      }
+      if (
+        att.metadata &&
+        typeof att.metadata === "object" &&
+        ((att.metadata as Record<string, unknown>).paymentLinkId === params.paymentLinkId ||
+          (att.metadata as Record<string, unknown>).paymentLinkId === params.invoiceId)
+      ) {
+        return true;
+      }
       return false;
     });
+
+    // 2. If not matched in-memory and Razorpay credentials exist, verify against Razorpay API
+    if (!matchedAttempt && params.providerPaymentId?.startsWith("pay_")) {
+      const keyId = process.env.RAZORPAY_KEY_ID;
+      const keySecret = process.env.RAZORPAY_KEY_SECRET;
+      if (keyId && keySecret) {
+        try {
+          const auth = "Basic " + Buffer.from(`${keyId}:${keySecret}`).toString("base64");
+          const payRes = await fetch(
+            `https://api.razorpay.com/v1/payments/${params.providerPaymentId}`,
+            { headers: { Authorization: auth } }
+          );
+          if (payRes.ok) {
+            const payData = (await payRes.json()) as {
+              invoice_id?: string;
+              notes?: Record<string, unknown>;
+              description?: string;
+            };
+
+            if (payData.invoice_id) {
+              matchedAttempt = openAttempts.find(
+                (att) => att.providerReference === payData.invoice_id
+              );
+            }
+
+            if (!matchedAttempt && payData.notes && typeof payData.notes === "object") {
+              const recId = payData.notes.recoveryAttemptId as string | undefined;
+              const origId = (payData.notes.originalExternalPaymentId ||
+                payData.notes.paymentEventId) as string | undefined;
+              matchedAttempt = openAttempts.find(
+                (att) =>
+                  (recId && att.id === recId) ||
+                  (origId && att.paymentEvent.externalPaymentId === origId)
+              );
+            }
+          }
+
+          // Check if any open attempt Payment Link shows this payment
+          if (!matchedAttempt) {
+            for (const att of openAttempts) {
+              if (att.providerReference?.startsWith("plink_")) {
+                try {
+                  const linkRes = await fetch(
+                    `https://api.razorpay.com/v1/payment_links/${att.providerReference}`,
+                    { headers: { Authorization: auth } }
+                  );
+                  if (linkRes.ok) {
+                    const linkData = (await linkRes.json()) as {
+                      status: string;
+                      payments?: Array<{ payment_id: string }> | null;
+                      notes?: Record<string, unknown>;
+                    };
+                    const isPaidLink =
+                      Array.isArray(linkData.payments) &&
+                      linkData.payments.some(
+                        (p) => p.payment_id === params.providerPaymentId
+                      );
+                    if (
+                      isPaidLink ||
+                      (linkData.status === "paid" &&
+                        linkData.notes?.originalExternalPaymentId ===
+                          att.paymentEvent.externalPaymentId)
+                    ) {
+                      matchedAttempt = att;
+                      break;
+                    }
+                  }
+                } catch {
+                  // ignore
+                }
+              }
+            }
+          }
+        } catch {
+          // ignore network failure
+        }
+      }
+    }
 
     if (!matchedAttempt) {
       return { isRecovery: false };
     }
 
-    // 2. Idempotency check: verify outcome does not already exist
+    // 3. Idempotency check: verify outcome does not already exist
     if (matchedAttempt.outcome && matchedAttempt.outcome.outcome === "SUCCESSFUL") {
       return {
         isRecovery: true,
@@ -411,7 +670,7 @@ export class RecoveryExecutionService {
     const finalStatus = isSuccess ? "SUCCESSFUL" : "FAILED";
     const actualAmount = isSuccess ? params.confirmedAmount : 0;
 
-    // 3. Atomically persist confirmed outcome and update attempt status
+    // 4. Atomically persist confirmed outcome and update attempt status
     const result = await this.db.$transaction(async (tx) => {
       // Update attempt status
       const updatedAttempt = await tx.recoveryAttempt.update({
@@ -447,19 +706,13 @@ export class RecoveryExecutionService {
 
       // Update parent BusinessTransaction if present
       if (isSuccess && matchedAttempt.paymentEvent.businessTransactionId) {
-        const bt = await tx.businessTransaction.findUnique({
+        await tx.businessTransaction.update({
           where: { id: matchedAttempt.paymentEvent.businessTransactionId },
+          data: {
+            status: "RECOVERED",
+            recoveryAttribution: "RECOVERAI",
+          },
         });
-
-        if (bt && bt.status !== "SUCCESSFUL" && bt.status !== "RECOVERED") {
-          await tx.businessTransaction.update({
-            where: { id: bt.id },
-            data: {
-              status: "RECOVERED",
-              recoveryAttribution: "RECOVERAI",
-            },
-          });
-        }
       }
 
       return { attempt: updatedAttempt, outcome };
