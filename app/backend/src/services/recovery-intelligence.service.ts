@@ -30,9 +30,8 @@ export class RecoveryIntelligenceService {
     let confidence: number | null = 0.5;
     let reasoning = "";
 
-    // Permanent classification is a hard safety boundary for automated recovery.
-    // Authentication/customer-action failures are intentionally handled below because
-    // the correct action is to obtain customer intervention, not to silently retry.
+    // PERMANENT is a hard safety boundary. A permanently classified failure
+    // can never become an automatic recovery target in this phase.
     if (
       classification === "PERMANENT" &&
       category !== "AUTHENTICATION" &&
@@ -103,11 +102,19 @@ export class RecoveryIntelligenceService {
         break;
 
       case "TEMPORARY":
-        worthiness = "RECOVER";
-        estimatedRecoverableAmount = originalAmount;
-        confidence = 0.85;
-        reasoning =
-          "The payment encountered a transient error. Full recovery is estimated upon scheduled retry.";
+        if (classification === "TEMPORARY") {
+          worthiness = "RECOVER";
+          estimatedRecoverableAmount = originalAmount;
+          confidence = 0.85;
+          reasoning =
+            "The payment encountered a transient error. Full recovery is estimated upon scheduled retry.";
+        } else {
+          worthiness = "REVIEW";
+          estimatedRecoverableAmount = originalAmount;
+          confidence = 0.5;
+          reasoning =
+            "A temporary-type failure was detected without definitive temporary classification. Manual review is recommended.";
+        }
         break;
 
       case "AUTHENTICATION":
