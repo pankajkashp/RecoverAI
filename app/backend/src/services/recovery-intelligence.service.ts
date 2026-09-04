@@ -3,13 +3,9 @@
  *
  * Phase 5: Recovery Intelligence
  *
- * Deterministic recovery intelligence engine responsible for:
- * 1. Determining recovery worthiness (RECOVER | DO_NOT_RECOVER | REVIEW).
- * 2. Estimating potentially recoverable amount.
- * 3. Providing transparent, explainable reasoning for recovery decisions.
- *
- * Consumes the structured FailureAnalysisResult from Phase 4.
- * Strictly deterministic rule-based logic. No ML models or AI APIs.
+ * Deterministic engine for recovery worthiness, estimated recoverable amount,
+ * and explainable reasoning. No ML is used here; ML is only a supporting signal
+ * in Phase 7 after this safety assessment.
  */
 
 import {
@@ -21,10 +17,6 @@ import {
 } from "@recoverai/contracts";
 
 export class RecoveryIntelligenceService {
-  /**
-   * Assesses recovery worthiness, estimates recoverable amount,
-   * and generates explainable reasoning for a failed payment event.
-   */
   public assessRecovery(
     event: CanonicalPaymentEvent,
     failureAnalysis: FailureAnalysisResult
@@ -38,29 +30,76 @@ export class RecoveryIntelligenceService {
     let confidence: number | null = 0.5;
     let reasoning = "";
 
+    // Permanent classification is a hard safety boundary for automated recovery.
+    // Authentication/customer-action failures are intentionally handled below because
+    // the correct action is to obtain customer intervention, not to silently retry.
+    if (
+      classification === "PERMANENT" &&
+      category !== "AUTHENTICATION" &&
+      category !== "CUSTOMER_ACTION_REQUIRED"
+    ) {
+      worthiness = "DO_NOT_RECOVER";
+      estimatedRecoverableAmount = 0;
+      confidence = 0.95;
+      reasoning =
+        `The failure is classified as permanent (${category}). Automated recovery is not recommended.`;
+
+      return this.buildResult(
+        worthiness,
+        estimatedRecoverableAmount,
+        originalAmount,
+        confidence,
+        reasoning
+      );
+    }
+
     switch (category) {
       case "INSUFFICIENT_FUNDS":
-        worthiness = "RECOVER";
-        estimatedRecoverableAmount = originalAmount;
-        confidence = 0.85;
-        reasoning =
-          "The payment failed due to a potentially temporary insufficient-funds condition. Full recovery is estimated via timed retry or customer reminder.";
+        if (classification === "TEMPORARY") {
+          worthiness = "RECOVER";
+          estimatedRecoverableAmount = originalAmount;
+          confidence = 0.85;
+          reasoning =
+            "The payment failed due to a potentially temporary insufficient-funds condition. Full recovery is estimated via timed retry or customer reminder.";
+        } else {
+          worthiness = "REVIEW";
+          estimatedRecoverableAmount = originalAmount;
+          confidence = 0.5;
+          reasoning =
+            "The payment indicates insufficient funds, but its temporary/permanent status is uncertain. Manual review is recommended.";
+        }
         break;
 
       case "NETWORK":
-        worthiness = "RECOVER";
-        estimatedRecoverableAmount = originalAmount;
-        confidence = 0.9;
-        reasoning =
-          "The payment failed due to a transient network or communication error. Full recovery is estimated upon automatic retry.";
+        if (classification === "TEMPORARY") {
+          worthiness = "RECOVER";
+          estimatedRecoverableAmount = originalAmount;
+          confidence = 0.9;
+          reasoning =
+            "The payment failed due to a transient network or communication error. Full recovery is estimated upon automatic retry.";
+        } else {
+          worthiness = "REVIEW";
+          estimatedRecoverableAmount = originalAmount;
+          confidence = 0.5;
+          reasoning =
+            "A network-related failure was detected without definitive temporary status. Manual review is recommended.";
+        }
         break;
 
       case "PROVIDER":
-        worthiness = "RECOVER";
-        estimatedRecoverableAmount = originalAmount;
-        confidence = 0.85;
-        reasoning =
-          "The failure was caused by a temporary provider-side outage or gateway error. Recovery is estimated once provider connectivity resumes.";
+        if (classification === "TEMPORARY") {
+          worthiness = "RECOVER";
+          estimatedRecoverableAmount = originalAmount;
+          confidence = 0.85;
+          reasoning =
+            "The failure was caused by a temporary provider-side outage or gateway error. Recovery is estimated once provider connectivity resumes.";
+        } else {
+          worthiness = "REVIEW";
+          estimatedRecoverableAmount = originalAmount;
+          confidence = 0.5;
+          reasoning =
+            "A provider-side failure was detected without definitive temporary status. Manual review is recommended.";
+        }
         break;
 
       case "TEMPORARY":
@@ -76,7 +115,7 @@ export class RecoveryIntelligenceService {
         estimatedRecoverableAmount = originalAmount;
         confidence = 0.6;
         reasoning =
-          "The payment failed customer authentication (OTP/3D Secure). Recovery requires review or customer checkout re-engagement.";
+          "The payment failed customer authentication (OTP/3D Secure). Recovery requires customer checkout re-engagement.";
         break;
 
       case "CUSTOMER_ACTION_REQUIRED":
@@ -84,7 +123,7 @@ export class RecoveryIntelligenceService {
         estimatedRecoverableAmount = originalAmount;
         confidence = 0.6;
         reasoning =
-          "Customer intervention is required (e.g. e-mandate approval or updated payment credentials) before recovery can be attempted.";
+          "Customer intervention is required before recovery can be attempted.";
         break;
 
       case "CARD":
@@ -101,13 +140,7 @@ export class RecoveryIntelligenceService {
           estimatedRecoverableAmount = originalAmount;
           confidence = 0.8;
           reasoning =
-            "The customer's bank was temporarily unavailable or switch timed out. Recovery is estimated upon bank service availability.";
-        } else if (classification === "PERMANENT") {
-          worthiness = "DO_NOT_RECOVER";
-          estimatedRecoverableAmount = 0;
-          confidence = 0.9;
-          reasoning =
-            "The bank permanently declined the transaction (account blocked or restricted). Recovery is not recommended.";
+            "The customer's bank was temporarily unavailable or the switch timed out. Recovery is estimated upon bank service availability.";
         } else {
           worthiness = "REVIEW";
           estimatedRecoverableAmount = originalAmount;
@@ -127,6 +160,22 @@ export class RecoveryIntelligenceService {
         break;
     }
 
+    return this.buildResult(
+      worthiness,
+      estimatedRecoverableAmount,
+      originalAmount,
+      confidence,
+      reasoning
+    );
+  }
+
+  private buildResult(
+    worthiness: RecoveryWorthiness,
+    estimatedRecoverableAmount: number,
+    originalAmount: number,
+    confidence: number | null,
+    reasoning: string
+  ): RecoveryAssessmentResult {
     return RecoveryAssessmentResultSchema.parse({
       worthiness,
       estimatedRecoverableAmount,
