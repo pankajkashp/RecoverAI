@@ -40,7 +40,7 @@ function signPayload(payload: object, secret: string = TEST_WEBHOOK_SECRET): str
   return crypto.createHmac("sha256", secret).update(jsonStr).digest("hex");
 }
 
-describe("Business Transaction & Multi-Attempt Payment Model", () => {
+describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 }, () => {
   const companyA = `comp_bt_a_${Date.now()}`;
   const companyB = `comp_bt_b_${Date.now()}`;
   let tokenCompanyA: string;

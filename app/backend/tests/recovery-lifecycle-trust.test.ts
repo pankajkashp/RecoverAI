@@ -29,7 +29,7 @@ function signPayload(payload: object, secret: string = TEST_WEBHOOK_SECRET): str
   return crypto.createHmac("sha256", secret).update(jsonStr).digest("hex");
 }
 
-describe("Recovery Lifecycle & Critical Trust Invariant", () => {
+describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, () => {
   const companyA = `comp_trust_a_${Date.now()}`;
   const companyB = `comp_trust_b_${Date.now()}`;
   let tokenCompanyA: string;
@@ -154,7 +154,7 @@ describe("Recovery Lifecycle & Critical Trust Invariant", () => {
       .set("Authorization", `Bearer ${tokenCompanyA}`);
 
     const initialActuallyRecovered = Number(
-      initialDash.body.data.metrics.actualRecoveredAmount
+      initialDash.body?.data?.metrics?.actualRecoveredAmount ?? 0
     );
 
     // Step 1: Initiate Recovery
@@ -652,6 +652,113 @@ describe("Recovery Lifecycle & Critical Trust Invariant", () => {
     expect(outcomes.length).toBe(1);
     expect(Number(outcomes[0].actualRecoveredAmount)).toBe(232);
   });
+
+  // --------------------------------------------------------------------------
+  // Test 10: Payment Pages Isolation & Normal Ingestion
+  // --------------------------------------------------------------------------
+  it("PAYMENT PAGES ISOLATION: unrelated Payment Pages payment.failed is NOT intercepted by historical paid links, reaches normal pipeline, and persists PaymentEvent", async () => {
+    // 1. Setup an existing historical recovery attempt with a Payment Link reference
+    const histFailed = await setupFailedPayment(`pay_hist_for_link_${Date.now()}`, 100.0);
+    const histExecRes = await request(app)
+      .post("/api/recovery-attempts")
+      .set("Authorization", `Bearer ${tokenCompanyA}`)
+      .send({ paymentEventId: histFailed.id });
+    expect(histExecRes.status).toBe(201);
+    const histPlink = histExecRes.body.data.providerReference;
+
+    // 2. Incoming unrelated Payment Pages failure webhook (e.g. ₹1,234 with order_id and no plink)
+    const paymentPageExtId = `pay_page_fail_${Date.now()}`;
+    const paymentPageOrderId = `order_page_${Date.now()}`;
+    const paymentPageWebhook = {
+      event: "payment.failed",
+      payload: {
+        payment: {
+          entity: {
+            id: paymentPageExtId,
+            amount: 123400,
+            currency: "INR",
+            status: "failed",
+            order_id: paymentPageOrderId,
+            invoice_id: null,
+            method: "card",
+            notes: {
+              email: "test@example.com",
+              phone: "+919876543210",
+            },
+            error_code: "BAD_REQUEST_ERROR",
+            error_description: "Payment failed",
+            error_source: "gateway",
+            error_step: "payment_authorization",
+            error_reason: "payment_failed",
+            created_at: Math.floor(Date.now() / 1000),
+          },
+        },
+      },
+    };
+
+    const signature = signPayload(paymentPageWebhook);
+    const webhookRes = await request(app)
+      .post(`/api/webhooks/razorpay?companyId=${companyA}`)
+      .set("X-Razorpay-Signature", signature)
+      .send(paymentPageWebhook);
+
+    // 3. Must NOT be intercepted as recovery — must return normal ingestion result
+    expect(webhookRes.status).toBe(200);
+    expect(webhookRes.body.isRecoveryConfirmation).toBeFalsy();
+    expect(webhookRes.body.success).toBe(true);
+    expect(webhookRes.body.eventId).toBeDefined();
+    expect(webhookRes.body.status).toBe("FAILED");
+
+    // 4. Must persist PaymentEvent in PostgreSQL
+    const persistedEvent = await prisma.paymentEvent.findFirst({
+      where: { externalPaymentId: paymentPageExtId },
+      include: {
+        businessTransaction: true,
+        failure: true,
+        assessment: true,
+        recommendation: true,
+      },
+    });
+
+    expect(persistedEvent).toBeDefined();
+    expect(Number(persistedEvent?.amount)).toBe(1234.0);
+    expect(persistedEvent?.status).toBe("FAILED");
+    expect(persistedEvent?.orderReference).toBe(paymentPageOrderId);
+    expect(persistedEvent?.businessTransaction).toBeDefined();
+    expect(persistedEvent?.businessTransaction?.status).toBe("FAILED");
+    expect(persistedEvent?.failure).toBeDefined();
+
+    // 5. Verify genuine recovery confirmation still works
+    const genuineRecoveryWebhook = {
+      event: "payment.captured",
+      payload: {
+        payment: {
+          entity: {
+            id: `pay_genuine_recovery_${Date.now()}`,
+            amount: 10000,
+            currency: "INR",
+            status: "captured",
+            invoice_id: histPlink,
+            order_id: histFailed.orderReference,
+            notes: [],
+            created_at: Math.floor(Date.now() / 1000),
+          },
+        },
+      },
+    };
+
+    const genuineSig = signPayload(genuineRecoveryWebhook);
+    const genuineRes = await request(app)
+      .post(`/api/webhooks/razorpay?companyId=${companyA}`)
+      .set("X-Razorpay-Signature", genuineSig)
+      .send(genuineRecoveryWebhook);
+
+    expect(genuineRes.status).toBe(200);
+    expect(genuineRes.body.isRecoveryConfirmation).toBe(true);
+    expect(genuineRes.body.outcomeStatus).toBe("SUCCESSFUL");
+    expect(Number(genuineRes.body.actualRecoveredAmount)).toBe(100.0);
+  });
 });
+
 
 

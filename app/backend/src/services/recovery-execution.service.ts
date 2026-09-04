@@ -539,20 +539,34 @@ export class RecoveryExecutionService {
       ) {
         return true;
       }
-      if (params.providerReference && att.providerReference === params.providerReference) {
+      if (
+        params.providerReference &&
+        att.providerReference &&
+        att.providerReference === params.providerReference
+      ) {
         return true;
       }
-      if (params.invoiceId && att.providerReference === params.invoiceId) {
+      if (
+        params.invoiceId &&
+        att.providerReference &&
+        att.providerReference === params.invoiceId
+      ) {
         return true;
       }
-      if (params.paymentLinkId && att.providerReference === params.paymentLinkId) {
+      if (
+        params.paymentLinkId &&
+        att.providerReference &&
+        att.providerReference === params.paymentLinkId
+      ) {
         return true;
       }
       if (
         params.orderId &&
-        (att.paymentEvent.orderReference === params.orderId ||
+        ((att.paymentEvent.orderReference &&
+          att.paymentEvent.orderReference === params.orderId) ||
           (att.metadata &&
             typeof att.metadata === "object" &&
+            (att.metadata as Record<string, unknown>).orderId &&
             (att.metadata as Record<string, unknown>).orderId === params.orderId))
       ) {
         return true;
@@ -560,8 +574,11 @@ export class RecoveryExecutionService {
       if (
         att.metadata &&
         typeof att.metadata === "object" &&
-        ((att.metadata as Record<string, unknown>).paymentLinkId === params.paymentLinkId ||
-          (att.metadata as Record<string, unknown>).paymentLinkId === params.invoiceId)
+        (att.metadata as Record<string, unknown>).paymentLinkId &&
+        ((params.paymentLinkId &&
+          (att.metadata as Record<string, unknown>).paymentLinkId === params.paymentLinkId) ||
+          (params.invoiceId &&
+            (att.metadata as Record<string, unknown>).paymentLinkId === params.invoiceId))
       ) {
         return true;
       }
@@ -588,7 +605,7 @@ export class RecoveryExecutionService {
 
             if (payData.invoice_id) {
               matchedAttempt = openAttempts.find(
-                (att) => att.providerReference === payData.invoice_id
+                (att) => att.providerReference && att.providerReference === payData.invoice_id
               );
             }
 
@@ -624,12 +641,7 @@ export class RecoveryExecutionService {
                       linkData.payments.some(
                         (p) => p.payment_id === params.providerPaymentId
                       );
-                    if (
-                      isPaidLink ||
-                      (linkData.status === "paid" &&
-                        linkData.notes?.originalExternalPaymentId ===
-                          att.paymentEvent.externalPaymentId)
-                    ) {
+                    if (isPaidLink) {
                       matchedAttempt = att;
                       break;
                     }
