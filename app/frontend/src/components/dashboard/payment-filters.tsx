@@ -27,7 +27,7 @@ export function PaymentFilters({
     Boolean(filters.recoveryStatus);
 
   return (
-    <div className="rounded-xl border border-border bg-card p-3.5 shadow-2xs space-y-3">
+    <div className="rounded-xl border border-border/80 bg-card p-4 shadow-xs space-y-3">
       <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
         {/* Search Input */}
         <div className="relative flex-1">
@@ -51,7 +51,7 @@ export function PaymentFilters({
             placeholder="Search payment ID, customer ref, or failure reason..."
             value={filters.search}
             onChange={(e) => onFilterChange({ search: e.target.value })}
-            className="w-full pl-8.5 pr-3 py-1.5 text-xs rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1.5 focus-visible:ring-ring focus-visible:border-foreground/30 transition-colors"
+            className="w-full pl-8.5 pr-3 py-1.5 text-xs rounded-lg border border-border/80 bg-background text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1.5 focus-visible:ring-indigo-500/50 focus-visible:border-indigo-500/50 transition-colors"
           />
         </div>
 
@@ -60,7 +60,7 @@ export function PaymentFilters({
           <button
             type="button"
             onClick={onReset}
-            className="text-xs font-medium text-muted-foreground hover:text-foreground flex items-center gap-1.5 self-end md:self-auto px-2.5 py-1 rounded-md border border-border/80 hover:bg-muted transition-colors cursor-pointer"
+            className="text-xs font-medium text-muted-foreground hover:text-foreground flex items-center gap-1.5 self-end md:self-auto px-2.5 py-1.5 rounded-lg border border-border/80 hover:bg-muted transition-colors cursor-pointer"
           >
             <svg
               className="h-3 w-3"
@@ -81,7 +81,7 @@ export function PaymentFilters({
       </div>
 
       {/* Dropdown Filters Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-2 border-t border-border/50">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-2 border-t border-border/40">
         {/* Payment Status */}
         <div>
           <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
@@ -90,7 +90,7 @@ export function PaymentFilters({
           <select
             value={filters.status}
             onChange={(e) => onFilterChange({ status: e.target.value })}
-            className="w-full text-xs rounded-md border border-border bg-background px-2.5 py-1.5 text-foreground focus-visible:outline-none focus-visible:ring-1.5 focus-visible:ring-ring transition-colors cursor-pointer"
+            className="w-full text-xs rounded-lg border border-border/80 bg-background px-2.5 py-1.5 text-foreground focus-visible:outline-none focus-visible:ring-1.5 focus-visible:ring-indigo-500/50 transition-colors cursor-pointer"
           >
             <option value="">All Statuses</option>
             <option value="FAILED">Failed</option>
@@ -110,7 +110,7 @@ export function PaymentFilters({
           <select
             value={filters.failureCategory}
             onChange={(e) => onFilterChange({ failureCategory: e.target.value })}
-            className="w-full text-xs rounded-md border border-border bg-background px-2.5 py-1.5 text-foreground focus-visible:outline-none focus-visible:ring-1.5 focus-visible:ring-ring transition-colors cursor-pointer"
+            className="w-full text-xs rounded-lg border border-border/80 bg-background px-2.5 py-1.5 text-foreground focus-visible:outline-none focus-visible:ring-1.5 focus-visible:ring-indigo-500/50 transition-colors cursor-pointer"
           >
             <option value="">All Categories</option>
             <option value="INSUFFICIENT_FUNDS">Insufficient Funds</option>
@@ -135,7 +135,7 @@ export function PaymentFilters({
             onChange={(e) =>
               onFilterChange({ recoveryWorthiness: e.target.value })
             }
-            className="w-full text-xs rounded-md border border-border bg-background px-2.5 py-1.5 text-foreground focus-visible:outline-none focus-visible:ring-1.5 focus-visible:ring-ring transition-colors cursor-pointer"
+            className="w-full text-xs rounded-lg border border-border/80 bg-background px-2.5 py-1.5 text-foreground focus-visible:outline-none focus-visible:ring-1.5 focus-visible:ring-indigo-500/50 transition-colors cursor-pointer"
           >
             <option value="">All Decisions</option>
             <option value="RECOVER">RECOVER</option>
@@ -152,7 +152,7 @@ export function PaymentFilters({
           <select
             value={filters.recoveryStatus}
             onChange={(e) => onFilterChange({ recoveryStatus: e.target.value })}
-            className="w-full text-xs rounded-md border border-border bg-background px-2.5 py-1.5 text-foreground focus-visible:outline-none focus-visible:ring-1.5 focus-visible:ring-ring transition-colors cursor-pointer"
+            className="w-full text-xs rounded-lg border border-border/80 bg-background px-2.5 py-1.5 text-foreground focus-visible:outline-none focus-visible:ring-1.5 focus-visible:ring-indigo-500/50 transition-colors cursor-pointer"
           >
             <option value="">All Outcomes</option>
             <option value="SUCCESSFUL">Successful</option>

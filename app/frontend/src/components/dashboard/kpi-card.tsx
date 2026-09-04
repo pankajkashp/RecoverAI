@@ -2,7 +2,6 @@ import React from "react";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 
 interface KpiCardProps {
-  stageNumber?: string;
   title: string;
   value: string | number;
   subtitle?: string;
@@ -13,7 +12,6 @@ interface KpiCardProps {
 }
 
 export function KpiCard({
-  stageNumber,
   title,
   value,
   subtitle,
@@ -24,14 +22,14 @@ export function KpiCard({
 }: KpiCardProps) {
   const badgeClasses = {
     default:
-      "bg-muted text-muted-foreground border-border/80",
+      "bg-muted/80 text-muted-foreground border-transparent",
     success:
-      "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 font-medium",
+      "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-transparent font-medium",
     warning:
-      "bg-amber-500/10 text-amber-800 dark:text-amber-300 border-amber-500/30 font-medium",
+      "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-transparent font-medium",
     danger:
-      "bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/30 font-medium",
-    info: "bg-sky-500/10 text-sky-800 dark:text-sky-300 border-sky-500/30 font-medium",
+      "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-transparent font-medium",
+    info: "bg-sky-500/10 text-sky-700 dark:text-sky-400 border-transparent font-medium",
   };
 
   const formattedValue = isCurrency
@@ -39,41 +37,33 @@ export function KpiCard({
     : formatNumber(value);
 
   return (
-    <div className="rounded-xl border border-border bg-card p-4.5 flex flex-col justify-between transition-colors shadow-2xs">
+    <div className="rounded-xl border border-border/80 bg-card p-5 flex flex-col justify-between transition-all hover:border-border shadow-xs">
       <div>
         <div className="flex items-center justify-between gap-2">
-          {stageNumber && (
-            <span className="font-mono text-[10px] font-semibold text-muted-foreground/80 uppercase tracking-wider">
-              {stageNumber}
-            </span>
-          )}
+          <span className="text-xs font-semibold text-muted-foreground tracking-normal uppercase">
+            {title}
+          </span>
           {badgeText && (
             <span
-              className={`inline-flex items-center rounded px-2 py-0.5 text-[11px] font-semibold tracking-wide border ${badgeClasses[badgeVariant]}`}
+              className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium ${badgeClasses[badgeVariant]}`}
             >
               {badgeText}
             </span>
           )}
         </div>
 
-        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mt-1.5">
-          {title}
+        <div className="mt-2.5">
+          <div className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground font-mono tabular-nums">
+            {formattedValue}
+          </div>
         </div>
       </div>
 
-      <div className="mt-3">
-        <div className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground font-mono tabular-nums">
-          {formattedValue}
+      {subtitle && (
+        <div className="mt-3.5 pt-2.5 border-t border-border/40 text-xs text-muted-foreground truncate">
+          {subtitle}
         </div>
-      </div>
-
-      <div className="mt-3 pt-2.5 border-t border-border/50">
-        {subtitle && (
-          <span className="text-xs text-muted-foreground block truncate">
-            {subtitle}
-          </span>
-        )}
-      </div>
+      )}
     </div>
   );
 }

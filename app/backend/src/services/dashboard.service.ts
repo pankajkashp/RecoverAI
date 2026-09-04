@@ -172,11 +172,11 @@ export class DashboardService {
         _sum: { amount: true },
         _count: { id: true },
       }),
-      // 16. Potentially recoverable sum from unresolved FAILED business transactions
+      // 16. Potentially recoverable sum from business transactions that required recovery
       this.prisma.businessTransaction.aggregate({
         where: {
           companyId: company.id,
-          status: "FAILED",
+          status: { in: ["FAILED", "RECOVERED"] },
         },
         _sum: { amount: true },
       }),
@@ -257,7 +257,10 @@ export class DashboardService {
 
     const recoveryRate =
       potRecoverableNum > 0
-        ? Number(((actRecoveredNum / potRecoverableNum) * 100).toFixed(1))
+        ? Math.min(
+            100,
+            Number(((actRecoveredNum / potRecoverableNum) * 100).toFixed(1))
+          )
         : 0;
 
     return {
