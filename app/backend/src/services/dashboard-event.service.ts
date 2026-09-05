@@ -11,7 +11,8 @@ export type DashboardEventType =
   | "PAYMENT_PROCESSED"
   | "RECOVERY_EXECUTED"
   | "RECOVERY_CONFIRMED"
-  | "TRANSACTION_UPDATED";
+  | "TRANSACTION_UPDATED"
+  | "DEMO_RESET";
 
 export interface DashboardEventPayload {
   type: DashboardEventType;

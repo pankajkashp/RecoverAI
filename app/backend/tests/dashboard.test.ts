@@ -403,4 +403,63 @@ describe("Phase 9 — Dashboard & Read API (Single Business)", () => {
       unsubscribe();
     });
   });
+
+  // --------------------------------------------------------------------------
+  // Date Range Filtering Tests
+  // --------------------------------------------------------------------------
+  describe("Date Range Filtering (GET /api/dashboard/summary and GET /api/dashboard/payments)", () => {
+    it("filters summary metrics by from/to dates", async () => {
+      // Filter to only events between 10:30 and 11:30 (should match payment 2 only)
+      const res = await request(app)
+        .get("/api/dashboard/summary")
+        .query({
+          from: "2026-08-25T10:30:00Z",
+          to: "2026-08-25T11:30:00Z",
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.metrics.totalPayments).toBe(1);
+      expect(res.body.data.metrics.failedPayments).toBe(1);
+      expect(Number(res.body.data.metrics.actualRecoveredAmount)).toBe(10000);
+    });
+
+    it("filters payment list by from/to dates", async () => {
+      const res = await request(app)
+        .get("/api/dashboard/payments")
+        .query({
+          from: "2026-08-25T10:30:00Z",
+          to: "2026-08-25T11:30:00Z",
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.items).toHaveLength(1);
+      expect(res.body.data.items[0].failure.category).toBe("INSUFFICIENT_FUNDS");
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Safe Demo Data Reset Tests
+  // --------------------------------------------------------------------------
+  describe("POST /api/dashboard/reset-demo-data", () => {
+    it("safely resets demo transaction data and broadcasts SSE event", async () => {
+      const res = await request(app).post("/api/dashboard/reset-demo-data");
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.deletedCount).toBeGreaterThan(0);
+
+      // Verify dashboard is now clean zero state
+      const summaryRes = await request(app).get("/api/dashboard/summary");
+      expect(summaryRes.body.data.metrics.totalPayments).toBe(0);
+      expect(summaryRes.body.data.metrics.failedPayments).toBe(0);
+      expect(Number(summaryRes.body.data.metrics.actualRecoveredAmount)).toBe(0);
+
+      // Verify provider was NOT deleted (referential integrity preserved)
+      const providers = await prisma.provider.findMany();
+      expect(providers.length).toBeGreaterThan(0);
+    });
+  });
 });
+

@@ -70,7 +70,7 @@ export class RecoveryExecutionService {
    */
   async executeRecovery(
     rawRequest: unknown,
-    callerCompanyId?: string
+    _callerCompanyId?: string
   ): Promise<RecoveryExecutionPipelineResult> {
     // 1. Validate request payload
     const request: RecoveryExecutionRequest =

@@ -32,7 +32,46 @@ export class DashboardService {
   /**
    * Retrieves canonical aggregate summary metrics for the single-business dashboard.
    */
-  async getDashboardSummary(_companyId?: string): Promise<DashboardSummaryResponse> {
+  async getDashboardSummary(
+    _companyId?: string,
+    dateRange?: { from?: Date; to?: Date }
+  ): Promise<DashboardSummaryResponse> {
+    const eventDateFilter: Prisma.DateTimeFilter | undefined =
+      dateRange?.from || dateRange?.to
+        ? {
+            gte: dateRange.from,
+            lte: dateRange.to,
+          }
+        : undefined;
+
+    const peBaseWhere: Prisma.PaymentEventWhereInput = eventDateFilter
+      ? { eventTimestamp: eventDateFilter }
+      : {};
+
+    const btBaseWhere: Prisma.BusinessTransactionWhereInput = eventDateFilter
+      ? { createdAt: eventDateFilter }
+      : {};
+
+    const raBaseWhere: Prisma.RecoveryAssessmentWhereInput = eventDateFilter
+      ? { assessedAt: eventDateFilter }
+      : {};
+
+    const roBaseWhere: Prisma.RecoveryOutcomeWhereInput = eventDateFilter
+      ? { outcomeTimestamp: eventDateFilter }
+      : {};
+
+    const rrBaseWhere: Prisma.RecoveryRecommendationWhereInput = eventDateFilter
+      ? { createdAt: eventDateFilter }
+      : {};
+
+    const attemptBaseWhere: Prisma.RecoveryAttemptWhereInput = eventDateFilter
+      ? { createdAt: eventDateFilter }
+      : {};
+
+    const pfBaseWhere: Prisma.PaymentFailureWhereInput = eventDateFilter
+      ? { failedAt: eventDateFilter }
+      : {};
+
     // 1. Fetch summary metrics concurrently in a single Promise.all
     const [
       totalPayments,
@@ -50,25 +89,28 @@ export class DashboardService {
       reviewCount,
       failedOutcomeCount,
       btTotalSum,
-      btPotRecoverableSum,
     ] = await Promise.all([
       // 1. Total payments count (attempts)
-      this.prisma.paymentEvent.count(),
+      this.prisma.paymentEvent.count({
+        where: peBaseWhere,
+      }),
       // 2. Failed payments count (attempts)
       this.prisma.paymentEvent.count({
-        where: { status: "FAILED" },
+        where: { ...peBaseWhere, status: "FAILED" },
       }),
       // 3. Completed payments count (attempts)
       this.prisma.paymentEvent.count({
-        where: { status: "COMPLETED" },
+        where: { ...peBaseWhere, status: "COMPLETED" },
       }),
       // 4. Total payments monetary sum (legacy fallback)
       this.prisma.paymentEvent.aggregate({
+        where: peBaseWhere,
         _sum: { amount: true },
       }),
       // 5. Potentially recoverable sum (legacy fallback)
       this.prisma.paymentEvent.aggregate({
         where: {
+          ...peBaseWhere,
           status: "FAILED",
           assessment: { worthiness: "RECOVER" },
         },
@@ -76,56 +118,61 @@ export class DashboardService {
       }),
       // 6. Estimated recoverable sum
       this.prisma.recoveryAssessment.aggregate({
+        where: raBaseWhere,
         _sum: { estimatedRecoverableAmount: true },
       }),
       // 7. Actual recovered sum
       this.prisma.recoveryOutcome.aggregate({
+        where: roBaseWhere,
         _sum: { actualRecoveredAmount: true },
       }),
       // 8. Recommended actions count
-      this.prisma.recoveryRecommendation.count(),
+      this.prisma.recoveryRecommendation.count({
+        where: rrBaseWhere,
+      }),
       // 9. Recovery attempts count
-      this.prisma.recoveryAttempt.count(),
+      this.prisma.recoveryAttempt.count({
+        where: attemptBaseWhere,
+      }),
       // 10. Successful recoveries count
       this.prisma.recoveryOutcome.count({
         where: {
+          ...roBaseWhere,
           outcome: "SUCCESSFUL",
         },
       }),
       // 11. Failure breakdown by category
       this.prisma.paymentFailure.groupBy({
         by: ["category"],
+        where: pfBaseWhere,
         _count: { category: true },
       }),
       // 12. Do not recover assessments count
       this.prisma.recoveryAssessment.count({
         where: {
+          ...raBaseWhere,
           worthiness: "DO_NOT_RECOVER",
         },
       }),
       // 13. Review required assessments count
       this.prisma.recoveryAssessment.count({
         where: {
+          ...raBaseWhere,
           worthiness: "REVIEW",
         },
       }),
       // 14. Failed recovery outcomes count
       this.prisma.recoveryOutcome.count({
         where: {
+          ...roBaseWhere,
           outcome: "FAILED",
         },
       }),
-      // 15. Total BusinessTransactions count and monetary sum (prevents multiplying volume by attempts)
+      // 15. Total BusinessTransactions count and monetary sum
       this.prisma.businessTransaction.aggregate({
+        where: btBaseWhere,
         _sum: { amount: true },
         _count: { id: true },
-      }),
-      // 16. Potentially recoverable sum from business transactions that required recovery
-      this.prisma.businessTransaction.aggregate({
-        where: {
-          status: { in: ["FAILED", "RECOVERED"] },
-        },
-        _sum: { amount: true },
       }),
     ]);
 
@@ -192,10 +239,9 @@ export class DashboardService {
         ? (btTotalSum._sum.amount ?? 0).toString()
         : (totalPaymentSum._sum.amount ?? 0).toString();
 
-    const potentiallyRecoverableAmount =
-      btTotalSum._count.id > 0
-        ? (btPotRecoverableSum._sum.amount ?? 0).toString()
-        : (potentiallyRecoverableSum._sum.amount ?? 0).toString();
+    const potentiallyRecoverableAmount = (
+      potentiallyRecoverableSum._sum.amount ?? 0
+    ).toString();
 
     const potRecoverableNum = Number(potentiallyRecoverableAmount);
     const actRecoveredNum = actualRecoveredSum._sum.actualRecoveredAmount
@@ -290,6 +336,13 @@ export class DashboardService {
         some: {
           status: query.recoveryStatus as RecoveryAttemptStatus,
         },
+      };
+    }
+
+    if (query.from || query.to) {
+      where.eventTimestamp = {
+        gte: query.from ? new Date(query.from as string | number | Date) : undefined,
+        lte: query.to ? new Date(query.to as string | number | Date) : undefined,
       };
     }
 
@@ -479,4 +532,32 @@ export class DashboardService {
       isDemo: true,
     };
   }
+
+  /**
+   * Safely resets transient transaction and recovery records in development/demo mode.
+   * Preserves Users, Providers, System Configurations, and ML Models.
+   */
+  async resetDemoData(): Promise<{ deletedCount: number }> {
+    const deletedOutcomes = await this.prisma.recoveryOutcome.deleteMany({});
+    const deletedAttempts = await this.prisma.recoveryAttempt.deleteMany({});
+    const deletedRecommendations = await this.prisma.recoveryRecommendation.deleteMany({});
+    const deletedAssessments = await this.prisma.recoveryAssessment.deleteMany({});
+    const deletedFailures = await this.prisma.paymentFailure.deleteMany({});
+    const deletedPredictions = await this.prisma.mlPrediction.deleteMany({});
+    const deletedEvents = await this.prisma.paymentEvent.deleteMany({});
+    const deletedTransactions = await this.prisma.businessTransaction.deleteMany({});
+
+    return {
+      deletedCount:
+        deletedOutcomes.count +
+        deletedAttempts.count +
+        deletedRecommendations.count +
+        deletedAssessments.count +
+        deletedFailures.count +
+        deletedPredictions.count +
+        deletedEvents.count +
+        deletedTransactions.count,
+    };
+  }
 }
+

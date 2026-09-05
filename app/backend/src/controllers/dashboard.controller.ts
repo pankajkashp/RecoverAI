@@ -9,13 +9,12 @@
 
 import { Request, Response, NextFunction } from "express";
 import { z } from "zod";
-import { DashboardPaymentsQuerySchema } from "@recoverai/contracts";
+import {
+  DashboardSummaryQuerySchema,
+  DashboardPaymentsQuerySchema,
+} from "@recoverai/contracts";
 import { DashboardService } from "../services/dashboard.service.js";
 import { dashboardEventService } from "../services/dashboard-event.service.js";
-
-const DashboardSummaryQuerySchema = z.object({
-  companyId: z.string().trim().optional(),
-});
 
 export class DashboardController {
   constructor(
@@ -24,7 +23,7 @@ export class DashboardController {
 
   /**
    * GET /api/dashboard/summary
-   * Returns aggregated dashboard metrics for the company.
+   * Returns aggregated dashboard metrics for the company with optional date filtering.
    */
   handleGetSummary = async (
     req: Request,
@@ -33,8 +32,14 @@ export class DashboardController {
   ): Promise<void> => {
     try {
       const query = DashboardSummaryQuerySchema.parse(req.query);
+      const dateRange =
+        query.from || query.to
+          ? { from: query.from, to: query.to }
+          : undefined;
+
       const summary = await this.dashboardService.getDashboardSummary(
-        query.companyId
+        query.companyId,
+        dateRange
       );
 
       res.status(200).json({
@@ -152,4 +157,42 @@ export class DashboardController {
       next(error);
     }
   };
+
+  /**
+   * POST /api/dashboard/reset-demo-data
+   * Safely resets transient demo transaction data in development/demo environments.
+   * Strictly blocked in production.
+   */
+  handleResetDemoData = async (
+    _req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      if (process.env.NODE_ENV === "production") {
+        res.status(403).json({
+          success: false,
+          error: "Demo data reset is disabled in production environments.",
+        });
+        return;
+      }
+
+      const result = await this.dashboardService.resetDemoData();
+
+      // Broadcast SSE event to instantly refresh all connected clients
+      dashboardEventService.emitDashboardEvent({
+        type: "DEMO_RESET",
+        timestamp: new Date().toISOString(),
+      });
+
+      res.status(200).json({
+        success: true,
+        message: "Demo transaction data reset successfully.",
+        data: result,
+      });
+    } catch (error: unknown) {
+      next(error);
+    }
+  };
 }
+

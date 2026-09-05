@@ -36,8 +36,6 @@ function signPayload(payload: object, secret: string = TEST_WEBHOOK_SECRET): str
 }
 
 describe("Phase 11 — Razorpay Sandbox Integration", () => {
-  let razorpayProviderId: string;
-
   beforeAll(async () => {
     // Seed Provider if not exists
     let provider = await prisma.provider.findFirst({
@@ -52,7 +50,6 @@ describe("Phase 11 — Razorpay Sandbox Integration", () => {
         },
       });
     }
-    razorpayProviderId = provider.id;
   });
 
   afterAll(async () => {

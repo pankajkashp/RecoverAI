@@ -41,7 +41,6 @@ function signPayload(payload: object, secret: string = TEST_WEBHOOK_SECRET): str
 }
 
 describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 }, () => {
-  const testPrefix = `bt_test_${Date.now()}`;
   const authToken = "demo_token_single_business";
 
   beforeAll(async () => {
