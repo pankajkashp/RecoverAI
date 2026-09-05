@@ -1,0 +1,15 @@
+.git
+.gitignore
+node_modules
+app/frontend/node_modules
+app/backend/node_modules
+.next
+app/frontend/.next
+.venv
+dist
+app/backend/dist
+*.log
+.pytest_cache
+.DS_Store
+*.tsbuildinfo
+.claude

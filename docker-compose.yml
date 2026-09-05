@@ -1,0 +1,89 @@
+services:
+  # 1. Local Isolated PostgreSQL Database (Isolated from production/demo database)
+  postgres:
+    image: postgres:16-alpine
+    container_name: recoverai-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: recoverai
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d recoverai"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. Python FastAPI Machine Learning Service
+  ml:
+    build:
+      context: .
+      dockerfile: app/ml_service/Dockerfile
+    container_name: recoverai-ml
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 3. Express TypeScript Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: app/backend/Dockerfile
+    container_name: recoverai-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ml:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      BACKEND_PORT: 4000
+      FRONTEND_URL: http://localhost:3001
+      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/recoverai?sslmode=disable
+      ML_SERVICE_URL: http://ml:8000
+      AUTH_SECRET: recoverai_docker_local_auth_secret_key_32_bytes_min
+      # Razorpay Test Mode Configuration (Passed from environment or .env)
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
+    ports:
+      - "4001:4000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 4. Next.js Frontend Dashboard
+  frontend:
+    build:
+      context: .
+      dockerfile: app/frontend/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:4001
+    container_name: recoverai-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      NEXT_PUBLIC_API_URL: http://localhost:4001
+    ports:
+      - "3001:3000"
+
+volumes:
+  postgres_data:
+    driver: local
