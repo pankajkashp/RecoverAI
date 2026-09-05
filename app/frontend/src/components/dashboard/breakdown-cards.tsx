@@ -68,7 +68,7 @@ export function BreakdownCards({
   const totalFailures = failureBreakdown.reduce((acc, curr) => acc + curr.count, 0);
 
   return (
-    <div className="rounded-xl border border-border/80 bg-card overflow-hidden shadow-xs">
+    <div className="rounded-2xl border border-border/70 bg-card/85 backdrop-blur-md overflow-hidden shadow-sm">
       {/* Collapsible Section Header */}
       <button
         type="button"

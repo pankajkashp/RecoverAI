@@ -1,12 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import {
   type PaymentLifecycleItem,
   type RecoveryExecutionPipelineResult,
 } from "@recoverai/contracts";
 import { executeRecovery, ApiError } from "@/lib/api-client";
 import { formatCurrency } from "@/lib/utils";
+
+const emptySubscribe = () => () => {};
+
+function useMounted() {
+  return useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false
+  );
+}
 
 interface PaymentDetailModalProps {
   payment: PaymentLifecycleItem | null;
@@ -72,10 +83,29 @@ export function PaymentDetailModal({
   onClose,
   onRecoverySuccess,
 }: PaymentDetailModalProps) {
+  const isMounted = useMounted();
   const [isExecuting, setIsExecuting] = useState(false);
   const [executionResult, setExecutionResult] =
     useState<RecoveryExecutionPipelineResult | null>(null);
   const [executionError, setExecutionError] = useState<string | null>(null);
+  const [copiedLink, setCopiedLink] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [onClose]);
 
   if (!payment) return null;
 
@@ -95,25 +125,37 @@ export function PaymentDetailModal({
     });
   };
 
-  return (
+  const handleCopyLink = (url: string) => {
+    navigator.clipboard.writeText(url);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2000);
+  };
+
+  const activeCheckoutUrl = executionResult?.checkoutUrl;
+
+  const modalContent = (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-xs"
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 md:p-8 bg-black/70 backdrop-blur-xs w-screen h-screen overflow-y-auto"
       role="dialog"
       aria-modal="true"
       aria-labelledby="modal-title"
+      onClick={onClose}
     >
       <div
-        className="relative w-full max-w-2xl rounded-2xl border border-border bg-card p-5 sm:p-6 shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
+        className="relative w-full max-w-4xl max-h-[90vh] rounded-2xl border border-border bg-card shadow-2xl flex flex-col my-auto overflow-hidden animate-in fade-in-50 zoom-in-95 duration-150"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Modal Header */}
-        <div className="flex items-center justify-between border-b border-border/80 pb-3.5">
+        {/* Pinned Modal Header */}
+        <div className="flex items-center justify-between border-b border-border/80 px-6 py-4 shrink-0 bg-card">
           <div>
-            <div className="flex items-center gap-2">
-              <h2 id="modal-title" className="text-base sm:text-lg font-bold text-foreground tracking-tight">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <h2
+                id="modal-title"
+                className="text-base sm:text-lg font-bold text-foreground tracking-tight"
+              >
                 Payment Lifecycle Audit
               </h2>
-              <span className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-300">
+              <span className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-300">
                 Demo / Razorpay Test Mode
               </span>
             </div>
@@ -126,7 +168,7 @@ export function PaymentDetailModal({
             type="button"
             onClick={onClose}
             aria-label="Close dialog"
-            className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+            className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
           >
             <svg
               className="h-5 w-5"
@@ -144,8 +186,8 @@ export function PaymentDetailModal({
           </button>
         </div>
 
-        {/* Modal Content / Unified Financial Ledger */}
-        <div className="mt-4 overflow-y-auto pr-1 space-y-3.5 text-xs">
+        {/* Scrollable Modal Content */}
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4 text-xs">
           <div className="rounded-xl border border-border bg-card divide-y divide-border/60 overflow-hidden shadow-2xs">
             {/* 1. Transaction Details */}
             <div className="p-4 space-y-2.5">
@@ -311,7 +353,6 @@ export function PaymentDetailModal({
                       </div>
                     )}
                 </div>
-
 
                 {payment.assessment.reasoning && (
                   <div className="rounded-md border border-border/70 bg-muted/30 p-2.5">
@@ -710,37 +751,46 @@ export function PaymentDetailModal({
                   </div>
                 )}
 
-                {executionResult?.checkoutUrl && (
+                {activeCheckoutUrl && (
                   <div className="mt-2.5 flex items-center justify-between rounded-md border border-indigo-500/20 bg-indigo-500/5 p-2.5">
                     <div className="min-w-0 flex-1 pr-2">
                       <span className="text-[10px] font-semibold uppercase text-indigo-700 dark:text-indigo-400 block mb-0.5">
                         Generated Payment Link
                       </span>
                       <p className="text-[11px] font-mono text-muted-foreground truncate">
-                        {executionResult.checkoutUrl}
+                        {activeCheckoutUrl}
                       </p>
                     </div>
-                    <a
-                      href={executionResult.checkoutUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-indigo-500 transition-colors cursor-pointer shrink-0"
-                    >
-                      <span>Open Recovery Payment Link</span>
-                      <svg
-                        className="h-3.5 w-3.5"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth="2"
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleCopyLink(activeCheckoutUrl)}
+                        className="rounded border border-border bg-card px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-muted transition-colors cursor-pointer"
                       >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
-                        />
-                      </svg>
-                    </a>
+                        {copiedLink ? "✓ Copied" : "Copy Link"}
+                      </button>
+                      <a
+                        href={activeCheckoutUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-indigo-500 transition-colors cursor-pointer"
+                      >
+                        <span>Open Link</span>
+                        <svg
+                          className="h-3.5 w-3.5"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                          />
+                        </svg>
+                      </a>
+                    </div>
                   </div>
                 )}
               </div>
@@ -748,8 +798,8 @@ export function PaymentDetailModal({
           </div>
         </div>
 
-        {/* Modal Footer */}
-        <div className="mt-4 pt-3 border-t border-border flex items-center justify-between">
+        {/* Pinned Modal Footer */}
+        <div className="border-t border-border/80 px-6 py-3.5 shrink-0 flex items-center justify-between bg-card">
           <div className="text-[11px] text-muted-foreground">
             {executionResult?.isExecuted && (
               <span className="text-emerald-700 dark:text-emerald-300 font-medium flex items-center gap-1.5">
@@ -777,9 +827,18 @@ export function PaymentDetailModal({
           >
             Close Details
           </button>
-
         </div>
       </div>
     </div>
   );
+
+  if (typeof document === "undefined") {
+    return modalContent;
+  }
+
+  if (!isMounted) {
+    return null;
+  }
+
+  return createPortal(modalContent, document.body);
 }

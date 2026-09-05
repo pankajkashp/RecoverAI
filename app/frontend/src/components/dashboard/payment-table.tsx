@@ -14,6 +14,7 @@ interface PaymentTableProps {
   onSortChange: (field: "eventTimestamp" | "amount") => void;
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
+  onSelectPayment?: (payment: PaymentLifecycleItem) => void;
   onRecoverySuccess?: () => void;
 }
 
@@ -81,6 +82,7 @@ export function PaymentTable({
   onSortChange,
   onPageChange,
   onPageSizeChange,
+  onSelectPayment,
   onRecoverySuccess,
 }: PaymentTableProps) {
 
@@ -91,7 +93,7 @@ export function PaymentTable({
   const pagination = data?.pagination;
 
   return (
-    <div className="rounded-xl border border-border bg-card shadow-2xs overflow-hidden">
+    <div className="rounded-2xl border border-border/70 bg-card/85 backdrop-blur-md shadow-sm overflow-hidden">
       {/* Table Header Controls */}
       <div className="p-4 border-b border-border/80 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
@@ -408,7 +410,11 @@ export function PaymentTable({
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          setSelectedPayment(item);
+                          if (onSelectPayment) {
+                            onSelectPayment(item);
+                          } else {
+                            setSelectedPayment(item);
+                          }
                         }}
                         className="rounded border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted transition-colors cursor-pointer shadow-2xs"
                         title="View payment lifecycle details"

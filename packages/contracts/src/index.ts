@@ -522,6 +522,27 @@ export const RecoveryBreakdownItemSchema = z.object({
 export type RecoveryBreakdownItem = z.infer<typeof RecoveryBreakdownItemSchema>;
 
 /**
+ * Dashboard date range preset options.
+ */
+export const DashboardDatePresetEnum = z.enum(["ALL", "7D", "30D", "60D"]);
+export type DashboardDatePreset = z.infer<typeof DashboardDatePresetEnum>;
+
+/**
+ * Query parameters for Dashboard Summary API.
+ */
+export const DashboardSummaryQuerySchema = z.object({
+  companyId: z.string().trim().optional(),
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+});
+export type DashboardSummaryQuery = z.input<
+  typeof DashboardSummaryQuerySchema
+>;
+export type DashboardSummaryQueryOutput = z.infer<
+  typeof DashboardSummaryQuerySchema
+>;
+
+/**
  * Dashboard Summary API response payload.
  */
 export const DashboardSummaryResponseSchema = z.object({
@@ -586,6 +607,8 @@ export const DashboardPaymentsQuerySchema = z.object({
   recoveryWorthiness: RecoveryWorthinessEnum.optional(),
   recommendationAction: z.string().optional(),
   recoveryStatus: RecoveryAttemptStatusEnum.optional(),
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
   sortBy: z
     .enum(["eventTimestamp", "amount", "createdAt"])
     .default("eventTimestamp"),

@@ -27,7 +27,7 @@ export function PaymentFilters({
     Boolean(filters.recoveryStatus);
 
   return (
-    <div className="rounded-xl border border-border/80 bg-card p-4 shadow-xs space-y-3">
+    <div className="rounded-2xl border border-border/70 bg-card/85 backdrop-blur-md p-4.5 shadow-sm space-y-3.5">
       <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
         {/* Search Input */}
         <div className="relative flex-1">

@@ -12,24 +12,26 @@ export function SummaryOverview({ summary }: SummaryOverviewProps) {
     <section aria-label="Recovery Funnel Overview" className="space-y-4">
       {/* 1. Main 4 KPI Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* KPI 1: Failed Payments */}
+        {/* KPI 1: Ingested Payments */}
         <KpiCard
-          title="Failed Payments"
-          value={metrics.failedPayments}
-          subtitle={`${metrics.failureRate}% failure rate • ${metrics.totalPayments} total ingested`}
-          badgeText={metrics.failedPayments > 0 ? "Failures Detected" : "Normal"}
-          badgeVariant={metrics.failedPayments > 0 ? "warning" : "default"}
+          title="Ingested Payments"
+          value={metrics.totalPayments}
+          subtitle={`${metrics.successfulPayments} completed • ${metrics.failedPayments} failed (${metrics.failureRate}%)`}
+          badgeText={metrics.failedPayments > 0 ? `${metrics.failedPayments} Failures` : "Healthy"}
+          badgeVariant={metrics.failedPayments > 0 ? "warning" : "success"}
+          accentColor={metrics.failedPayments > 0 ? "amber" : "default"}
         />
 
-        {/* KPI 2: Recoverable Value */}
+        {/* KPI 2: Potentially Recoverable Pool */}
         <KpiCard
-          title="Recoverable Value"
+          title="Potentially Recoverable"
           value={metrics.potentiallyRecoverableAmount}
           isCurrency={true}
           currency={currency}
-          subtitle="Evaluated recovery candidate pool"
+          subtitle="Qualified high-confidence failure pool"
           badgeText="Target Pool"
           badgeVariant="info"
+          accentColor="sky"
         />
 
         {/* KPI 3: Expected Recovery */}
@@ -39,67 +41,70 @@ export function SummaryOverview({ summary }: SummaryOverviewProps) {
           isCurrency={true}
           currency={currency}
           subtitle={`Forecast across ${metrics.recommendedCount} recommendations`}
-          badgeText="Intelligence Forecast"
-          badgeVariant="default"
+          badgeText="ML Forecast"
+          badgeVariant="primary"
+          accentColor="indigo"
         />
 
-        {/* KPI 4: Actually Recovered */}
+        {/* KPI 4: Actually Recovered (Strongest Hero Highlight) */}
         <KpiCard
           title="Actually Recovered"
           value={metrics.actualRecoveredAmount}
           isCurrency={true}
           currency={currency}
-          subtitle={`${metrics.successfulRecoveryCount} of ${metrics.attemptedCount} attempts successful`}
-          badgeText={`${metrics.recoveryRate}% realized`}
+          subtitle={`${metrics.successfulRecoveryCount} of ${metrics.attemptedCount} attempts recovered`}
+          badgeText={`${metrics.recoveryRate}% Realized`}
           badgeVariant="success"
+          accentColor="emerald"
         />
       </div>
 
-      {/* 2. Simplified Recovery Progress Funnel */}
-      <div className="rounded-xl border border-border/80 bg-card px-4 py-3 shadow-xs">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+      {/* 2. Recovery Conversion Pipeline & Realized Revenue Callout */}
+      <div className="rounded-2xl border border-border/70 bg-card/85 backdrop-blur-md px-5 py-3.5 shadow-sm space-y-2.5">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-2">
-            <span className="font-semibold text-foreground/90 uppercase tracking-wider text-[11px]">
-              Recovery Pipeline
+            <span className="flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="font-bold text-foreground/90 uppercase tracking-wider text-[11px]">
+              Recovery Conversion Pipeline
             </span>
-            <span className="text-muted-foreground text-[11px]">
-              (Real-time conversion flow)
+            <span className="hidden sm:inline text-muted-foreground text-[11px]">
+              — Real-time financial conversion flow
             </span>
           </div>
 
-          {/* Funnel Steps */}
+          {/* Funnel Step Pills */}
           <div className="flex items-center flex-wrap gap-2 text-xs">
-            <div className="flex items-center gap-1.5 font-medium">
-              <span className="text-muted-foreground">Failed:</span>
-              <span className="font-mono font-semibold text-foreground">
+            <div className="flex items-center gap-1.5 font-medium rounded-lg border border-border/80 bg-background/60 px-2.5 py-1">
+              <span className="text-muted-foreground text-[11px]">1. Ingested Failures:</span>
+              <span className="font-mono font-bold text-foreground text-[11px]">
                 {metrics.failedPayments}
               </span>
             </div>
 
-            <span className="text-muted-foreground/60">→</span>
+            <span className="text-muted-foreground/50 font-bold">→</span>
 
-            <div className="flex items-center gap-1.5 font-medium">
-              <span className="text-muted-foreground">Recommended:</span>
-              <span className="font-mono font-semibold text-foreground">
+            <div className="flex items-center gap-1.5 font-medium rounded-lg border border-indigo-500/20 bg-indigo-500/5 px-2.5 py-1 text-indigo-700 dark:text-indigo-300">
+              <span className="text-muted-foreground text-[11px]">2. Recommended:</span>
+              <span className="font-mono font-bold text-[11px]">
                 {metrics.recommendedCount}
               </span>
             </div>
 
-            <span className="text-muted-foreground/60">→</span>
+            <span className="text-muted-foreground/50 font-bold">→</span>
 
-            <div className="flex items-center gap-1.5 font-medium">
-              <span className="text-muted-foreground">Attempted:</span>
-              <span className="font-mono font-semibold text-foreground">
+            <div className="flex items-center gap-1.5 font-medium rounded-lg border border-sky-500/20 bg-sky-500/5 px-2.5 py-1 text-sky-700 dark:text-sky-300">
+              <span className="text-muted-foreground text-[11px]">3. Attempted:</span>
+              <span className="font-mono font-bold text-[11px]">
                 {metrics.attemptedCount}
               </span>
             </div>
 
-            <span className="text-muted-foreground/60">→</span>
+            <span className="text-muted-foreground/50 font-bold">→</span>
 
-            <div className="flex items-center gap-1.5 font-medium bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded-md">
-              <span>Recovered:</span>
-              <span className="font-mono font-bold">
-                {metrics.successfulRecoveryCount}
+            <div className="flex items-center gap-1.5 font-medium rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-emerald-700 dark:text-emerald-300 shadow-xs">
+              <span className="font-semibold text-[11px]">4. Realized Recovered:</span>
+              <span className="font-mono font-extrabold text-[11px]">
+                {metrics.successfulRecoveryCount} ({metrics.recoveryRate}%)
               </span>
             </div>
           </div>
@@ -108,4 +113,6 @@ export function SummaryOverview({ summary }: SummaryOverviewProps) {
     </section>
   );
 }
+
+
 

@@ -93,14 +93,18 @@ export async function executeRecovery(
 
 
 /**
- * Fetches company dashboard summary metrics.
+ * Fetches company dashboard summary metrics with optional date range.
  */
 export async function fetchDashboardSummary(
-  companyId?: string
+  options?: string | { companyId?: string; from?: string; to?: string }
 ): Promise<DashboardSummaryResponse> {
   const url = new URL(`${API_BASE_URL}/api/dashboard/summary`);
-  if (companyId) {
-    url.searchParams.set("companyId", companyId);
+  if (typeof options === "string") {
+    url.searchParams.set("companyId", options);
+  } else if (options) {
+    if (options.companyId) url.searchParams.set("companyId", options.companyId);
+    if (options.from) url.searchParams.set("from", options.from);
+    if (options.to) url.searchParams.set("to", options.to);
   }
 
   const response = await fetch(url.toString(), {
@@ -132,7 +136,7 @@ export async function fetchDashboardSummary(
 }
 
 /**
- * Fetches paginated, sorted, and filtered payment lifecycle records.
+ * Fetches paginated, sorted, and filtered payment lifecycle records with optional date range.
  */
 export async function fetchDashboardPayments(
   query: DashboardPaymentsQuery
@@ -151,6 +155,18 @@ export async function fetchDashboardPayments(
     url.searchParams.set("recommendationAction", query.recommendationAction);
   if (query.recoveryStatus)
     url.searchParams.set("recoveryStatus", query.recoveryStatus);
+  if (query.from) {
+    url.searchParams.set(
+      "from",
+      query.from instanceof Date ? query.from.toISOString() : String(query.from)
+    );
+  }
+  if (query.to) {
+    url.searchParams.set(
+      "to",
+      query.to instanceof Date ? query.to.toISOString() : String(query.to)
+    );
+  }
   if (query.sortBy) url.searchParams.set("sortBy", query.sortBy);
   if (query.sortOrder) url.searchParams.set("sortOrder", query.sortOrder);
   if (query.search) url.searchParams.set("search", query.search);
@@ -182,3 +198,34 @@ export async function fetchDashboardPayments(
 
   return parsed.data;
 }
+
+/**
+ * Safely resets transient demo transaction data in development/demo mode.
+ * Communicates with POST /api/dashboard/reset-demo-data.
+ */
+export async function resetDemoData(): Promise<{ deletedCount: number }> {
+  const url = `${API_BASE_URL}/api/dashboard/reset-demo-data`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    let errorMsg = `Failed to reset demo data: HTTP ${response.status}`;
+    try {
+      const errJson = await response.json();
+      if (errJson.error) errorMsg = errJson.error;
+    } catch {
+      // ignore parse error
+    }
+    throw new ApiError(response.status, errorMsg);
+  }
+
+  const json = await response.json();
+  return json.data as { deletedCount: number };
+}
+

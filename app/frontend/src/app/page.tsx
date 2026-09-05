@@ -8,10 +8,12 @@ import {
   type FailureCategory,
   type RecoveryWorthiness,
   type RecoveryAttemptStatus,
+  type DashboardDatePreset,
 } from "@recoverai/contracts";
 import {
   fetchDashboardSummary,
   fetchDashboardPayments,
+  resetDemoData,
   ApiError,
 } from "@/lib/api-client";
 import { DashboardHeader } from "@/components/dashboard/header";
@@ -31,12 +33,26 @@ const initialFilterState: FilterState = {
   recoveryStatus: "",
 };
 
+function computeDateRange(preset: DashboardDatePreset): {
+  from?: string;
+  to?: string;
+} {
+  if (preset === "ALL") return { from: undefined, to: undefined };
+  const now = new Date();
+  const days = preset === "7D" ? 7 : preset === "30D" ? 30 : 60;
+  const from = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+  return { from: from.toISOString(), to: now.toISOString() };
+}
+
 export default function DashboardPage() {
   const [summary, setSummary] = useState<DashboardSummaryResponse | null>(null);
   const [payments, setPayments] = useState<DashboardPaymentsResponse | null>(null);
   const [isLoadingSummary, setIsLoadingSummary] = useState(true);
   const [isLoadingPayments, setIsLoadingPayments] = useState(true);
+  const [isResetting, setIsResetting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sseStatus, setSseStatus] = useState<"connected" | "connecting" | "disconnected">("connecting");
+  const [selectedDatePreset, setSelectedDatePreset] = useState<DashboardDatePreset>("ALL");
 
   const [filters, setFilters] = useState<FilterState>(initialFilterState);
   const [sortBy, setSortBy] = useState<"eventTimestamp" | "amount">("eventTimestamp");
@@ -46,12 +62,13 @@ export default function DashboardPage() {
 
   const isRefreshingRef = useRef(false);
 
-  // Fetch summary data
+  // Fetch summary data with date range
   const loadSummary = useCallback(async () => {
     try {
       setIsLoadingSummary(true);
       setError(null);
-      const data = await fetchDashboardSummary();
+      const dateRange = computeDateRange(selectedDatePreset);
+      const data = await fetchDashboardSummary(dateRange);
       setSummary(data);
     } catch (err: unknown) {
       console.error("Failed to load dashboard summary:", err);
@@ -63,12 +80,13 @@ export default function DashboardPage() {
     } finally {
       setIsLoadingSummary(false);
     }
-  }, []);
+  }, [selectedDatePreset]);
 
-  // Fetch payments list
+  // Fetch payments list with date range
   const loadPayments = useCallback(async () => {
     try {
       setIsLoadingPayments(true);
+      const dateRange = computeDateRange(selectedDatePreset);
       const data = await fetchDashboardPayments({
         page,
         pageSize,
@@ -82,6 +100,8 @@ export default function DashboardPage() {
         recoveryStatus: filters.recoveryStatus
           ? (filters.recoveryStatus as RecoveryAttemptStatus)
           : undefined,
+        from: dateRange.from ? new Date(dateRange.from) : undefined,
+        to: dateRange.to ? new Date(dateRange.to) : undefined,
         search: filters.search ? filters.search : undefined,
         sortBy,
         sortOrder,
@@ -89,11 +109,10 @@ export default function DashboardPage() {
       setPayments(data);
     } catch (err: unknown) {
       console.error("Failed to load payments:", err);
-      // We don't overwrite the main error unless summary also failed
     } finally {
       setIsLoadingPayments(false);
     }
-  }, [page, pageSize, filters, sortBy, sortOrder]);
+  }, [page, pageSize, filters, sortBy, sortOrder, selectedDatePreset]);
 
   // Initial load & when dependencies change
   useEffect(() => {
@@ -119,7 +138,11 @@ export default function DashboardPage() {
 
   // Real-time Event-Driven Dashboard Refresh via Server-Sent Events (SSE)
   useEffect(() => {
-    if (typeof window === "undefined" || typeof EventSource === "undefined") return;
+    if (typeof window === "undefined" || typeof EventSource === "undefined") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSseStatus("disconnected");
+      return;
+    }
 
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
     const eventSourceUrl = `${apiUrl}/api/dashboard/events`;
@@ -128,6 +151,10 @@ export default function DashboardPage() {
     try {
       eventSource = new EventSource(eventSourceUrl, { withCredentials: true });
 
+      eventSource.onopen = () => {
+        setSseStatus("connected");
+      };
+
       eventSource.addEventListener("dashboard_update", () => {
         refreshDashboard();
       });
@@ -135,8 +162,13 @@ export default function DashboardPage() {
       eventSource.onmessage = () => {
         refreshDashboard();
       };
+
+      eventSource.onerror = () => {
+        setSseStatus("connecting");
+      };
     } catch (err) {
       console.warn("EventSource connection error:", err);
+      setSseStatus("disconnected");
     }
 
     return () => {
@@ -148,6 +180,29 @@ export default function DashboardPage() {
 
   const handleRefreshAll = () => {
     refreshDashboard();
+  };
+
+  const handleDatePresetChange = (preset: DashboardDatePreset) => {
+    setSelectedDatePreset(preset);
+    setPage(1);
+  };
+
+  const handleResetDemoData = async () => {
+    try {
+      setIsResetting(true);
+      setError(null);
+      await resetDemoData();
+      await refreshDashboard();
+    } catch (err: unknown) {
+      console.error("Failed to reset demo data:", err);
+      if (err instanceof ApiError) {
+        setError(err.message);
+      } else {
+        setError("Failed to reset demo data.");
+      }
+    } finally {
+      setIsResetting(false);
+    }
   };
 
   const handleFilterChange = (newFilters: Partial<FilterState>) => {
@@ -171,20 +226,32 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col antialiased selection:bg-indigo-500 selection:text-white">
-      {/* 1. Header */}
+    <div className="min-h-screen bg-background text-foreground flex flex-col antialiased selection:bg-indigo-500 selection:text-white relative overflow-hidden">
+      {/* Ambient background glow effects */}
+      <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden opacity-30 dark:opacity-20" aria-hidden="true">
+        <div className="absolute -top-40 -left-40 h-[500px] w-[500px] rounded-full bg-indigo-500/20 blur-[120px]" />
+        <div className="absolute top-1/3 -right-40 h-[500px] w-[500px] rounded-full bg-violet-500/20 blur-[140px]" />
+        <div className="absolute -bottom-40 left-1/3 h-[450px] w-[450px] rounded-full bg-emerald-500/15 blur-[120px]" />
+      </div>
+
+      {/* 1. Header with Date Filter and Reset Demo Data */}
       <DashboardHeader
         companyName={summary?.company?.name || "RecoverAI"}
         isDemo={summary?.isDemo ?? true}
         onRefresh={handleRefreshAll}
         isLoading={isLoadingSummary || isLoadingPayments}
+        sseStatus={sseStatus}
+        selectedDatePreset={selectedDatePreset}
+        onDatePresetChange={handleDatePresetChange}
+        onResetDemoData={handleResetDemoData}
+        isResetting={isResetting}
       />
 
       {/* 2. Main Dashboard Content */}
-      <main className="flex-1 max-w-[1440px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+      <main className="relative z-10 flex-1 max-w-[1440px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
         {/* Error Alert with Retry */}
         {error && (
-          <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-xs text-rose-600 dark:text-rose-400 flex items-center justify-between gap-3">
+          <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4 text-xs text-rose-600 dark:text-rose-400 flex items-center justify-between gap-3 shadow-xs">
             <div className="flex items-center gap-2">
               <svg
                 className="h-4 w-4 shrink-0"
@@ -204,7 +271,7 @@ export default function DashboardPage() {
             <button
               type="button"
               onClick={handleRefreshAll}
-              className="rounded-md bg-rose-500/20 px-3 py-1 font-semibold hover:bg-rose-500/30 transition-colors"
+              className="rounded-lg bg-rose-500/20 px-3 py-1 font-semibold hover:bg-rose-500/30 transition-colors cursor-pointer"
             >
               Retry
             </button>
@@ -243,11 +310,10 @@ export default function DashboardPage() {
           }}
           onRecoverySuccess={handleRefreshAll}
         />
-
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-border bg-card/60 py-4 mt-auto text-xs text-muted-foreground">
+      <footer className="relative z-10 border-t border-border/70 bg-card/40 backdrop-blur-md py-4 mt-auto text-xs text-muted-foreground">
         <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2">
           <span>RecoverAI — Autonomous Payment Failure Recovery Platform</span>
           <span className="font-mono text-[11px] text-muted-foreground/80">
@@ -255,7 +321,6 @@ export default function DashboardPage() {
           </span>
         </div>
       </footer>
-
     </div>
   );
 }
