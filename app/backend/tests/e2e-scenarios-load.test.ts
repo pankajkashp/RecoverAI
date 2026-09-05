@@ -20,26 +20,19 @@ const app = createApp();
 const authService = new AuthService();
 
 describe("Phase 13 — E2E Scenarios & Load Benchmarking", () => {
-  const companyId = `comp_p13_${Date.now()}`;
+  const testPrefix = `p13_${Date.now()}`;
   let adminToken: string;
   let providerId: string;
+  let userId: string;
 
   beforeAll(async () => {
-    // 1. Provision Test Company & Admin User
-    await prisma.company.create({
-      data: {
-        id: companyId,
-        name: "Phase 13 Benchmark Enterprise",
-      },
-    });
-
+    userId = `user_p13_${Date.now()}`;
     const user = await prisma.user.create({
       data: {
-        id: `user_p13_${Date.now()}`,
+        id: userId,
         email: `admin-${Date.now()}@p13benchmark.com`,
         name: "Benchmark Admin",
         role: "ADMIN",
-        companyId,
       },
     });
 
@@ -48,10 +41,9 @@ describe("Phase 13 — E2E Scenarios & Load Benchmarking", () => {
       email: user.email,
       name: user.name,
       role: "ADMIN",
-      companyId,
     });
 
-    // 2. Ensure Provider exists
+    // Ensure Provider exists
     const provider = await prisma.provider.upsert({
       where: { id: "provider_demo_sandbox" },
       update: {},
@@ -66,29 +58,29 @@ describe("Phase 13 — E2E Scenarios & Load Benchmarking", () => {
 
   afterAll(async () => {
     await prisma.recoveryOutcome.deleteMany({
-      where: { recoveryAttempt: { paymentEvent: { companyId } } },
+      where: { recoveryAttempt: { paymentEvent: { externalPaymentId: { startsWith: testPrefix } } } },
     });
     await prisma.recoveryAttempt.deleteMany({
-      where: { paymentEvent: { companyId } },
+      where: { paymentEvent: { externalPaymentId: { startsWith: testPrefix } } },
     });
     await prisma.recoveryRecommendation.deleteMany({
-      where: { paymentEvent: { companyId } },
+      where: { paymentEvent: { externalPaymentId: { startsWith: testPrefix } } },
     });
     await prisma.recoveryAssessment.deleteMany({
-      where: { paymentEvent: { companyId } },
+      where: { paymentEvent: { externalPaymentId: { startsWith: testPrefix } } },
     });
     await prisma.paymentFailure.deleteMany({
-      where: { paymentEvent: { companyId } },
+      where: { paymentEvent: { externalPaymentId: { startsWith: testPrefix } } },
+    });
+    await prisma.mlPrediction.deleteMany({
+      where: { paymentEvent: { externalPaymentId: { startsWith: testPrefix } } },
     });
     await prisma.paymentEvent.deleteMany({
-      where: { companyId },
+      where: { externalPaymentId: { startsWith: testPrefix } },
     });
-    await prisma.user.deleteMany({
-      where: { companyId },
-    });
-    await prisma.company.deleteMany({
-      where: { id: companyId },
-    });
+    if (userId) {
+      await prisma.user.deleteMany({ where: { id: userId } });
+    }
     await prisma.$disconnect();
   });
 
@@ -97,7 +89,7 @@ describe("Phase 13 — E2E Scenarios & Load Benchmarking", () => {
   // --------------------------------------------------------------------------
   describe("Complete E2E Scenarios (A - E)", () => {
     it("Scenario A: Failed Payment -> Recoverable -> Retry Rec -> Execution -> SUCCESSFUL Outcome", async () => {
-      const extId = `pay_e2e_scen_a_${Date.now()}`;
+      const extId = `${testPrefix}_scen_a_${Date.now()}`;
 
       // Ingest Failed Payment (Insufficient Funds)
       const ingestRes = await request(app)
@@ -105,7 +97,6 @@ describe("Phase 13 — E2E Scenarios & Load Benchmarking", () => {
         .set("Authorization", `Bearer ${adminToken}`)
         .send({
           externalPaymentId: extId,
-          companyId,
           amount: 5000,
           currency: "INR",
           status: "FAILED",
@@ -143,14 +134,13 @@ describe("Phase 13 — E2E Scenarios & Load Benchmarking", () => {
     });
 
     it("Scenario B: Failed Payment -> Recoverable -> Rec -> Execution -> FAILED Outcome", async () => {
-      const extId = `pay_e2e_scen_b_${Date.now()}`;
+      const extId = `${testPrefix}_scen_b_${Date.now()}`;
 
       const ingestRes = await request(app)
         .post("/api/payment-events")
         .set("Authorization", `Bearer ${adminToken}`)
         .send({
           externalPaymentId: extId,
-          companyId,
           amount: 3200,
           currency: "INR",
           status: "FAILED",
@@ -178,14 +168,13 @@ describe("Phase 13 — E2E Scenarios & Load Benchmarking", () => {
     });
 
     it("Scenario C: Failed Payment -> Permanent -> DO_NOT_RECOVER -> Execution Blocked", async () => {
-      const extId = `pay_e2e_scen_c_${Date.now()}`;
+      const extId = `${testPrefix}_scen_c_${Date.now()}`;
 
       const ingestRes = await request(app)
         .post("/api/payment-events")
         .set("Authorization", `Bearer ${adminToken}`)
         .send({
           externalPaymentId: extId,
-          companyId,
           amount: 8000,
           currency: "INR",
           status: "FAILED",
@@ -213,14 +202,13 @@ describe("Phase 13 — E2E Scenarios & Load Benchmarking", () => {
     });
 
     it("Scenario D: Failed Payment -> REVIEW -> Review Rec -> Execution Blocked", async () => {
-      const extId = `pay_e2e_scen_d_${Date.now()}`;
+      const extId = `${testPrefix}_scen_d_${Date.now()}`;
 
       const ingestRes = await request(app)
         .post("/api/payment-events")
         .set("Authorization", `Bearer ${adminToken}`)
         .send({
           externalPaymentId: extId,
-          companyId,
           amount: 15000,
           currency: "INR",
           status: "FAILED",
@@ -248,14 +236,13 @@ describe("Phase 13 — E2E Scenarios & Load Benchmarking", () => {
     });
 
     it("Scenario E: Successful Payment -> No Failure -> No Assessment -> No Recommendation", async () => {
-      const extId = `pay_e2e_scen_e_${Date.now()}`;
+      const extId = `${testPrefix}_scen_e_${Date.now()}`;
 
       const ingestRes = await request(app)
         .post("/api/payment-events")
         .set("Authorization", `Bearer ${adminToken}`)
         .send({
           externalPaymentId: extId,
-          companyId,
           amount: 12000,
           currency: "INR",
           status: "COMPLETED",
@@ -270,7 +257,7 @@ describe("Phase 13 — E2E Scenarios & Load Benchmarking", () => {
 
       // Check database
       const payment = await prisma.paymentEvent.findFirst({
-        where: { externalPaymentId: extId, companyId },
+        where: { externalPaymentId: extId },
         include: {
           failure: true,
           assessment: true,
@@ -300,8 +287,7 @@ describe("Phase 13 — E2E Scenarios & Load Benchmarking", () => {
           .post("/api/payment-events")
           .set("Authorization", `Bearer ${adminToken}`)
           .send({
-            externalPaymentId: `pay_load_${Date.now()}_${i}`,
-            companyId,
+            externalPaymentId: `${testPrefix}_load_${Date.now()}_${i}`,
             amount: 1000 + i * 100,
             currency: "INR",
             status: "FAILED",
@@ -328,13 +314,13 @@ describe("Phase 13 — E2E Scenarios & Load Benchmarking", () => {
       const start = Date.now();
 
       const res = await request(app)
-        .get(`/api/dashboard/summary?companyId=${companyId}`)
+        .get("/api/dashboard/summary")
         .set("Authorization", `Bearer ${adminToken}`);
 
       const durationMs = Date.now() - start;
 
       expect(res.status).toBe(200);
-      expect(res.body.data.company.id).toBe(companyId);
+      expect(res.body.data.business.name).toBeDefined();
       console.log(`[BENCHMARK] Dashboard summary query latency: ${durationMs}ms`);
 
       expect(durationMs).toBeLessThan(10000);
@@ -344,7 +330,7 @@ describe("Phase 13 — E2E Scenarios & Load Benchmarking", () => {
       const start = Date.now();
 
       const res = await request(app)
-        .get(`/api/dashboard/payments?companyId=${companyId}&page=1&pageSize=10`)
+        .get("/api/dashboard/payments?page=1&pageSize=10")
         .set("Authorization", `Bearer ${adminToken}`);
 
       const durationMs = Date.now() - start;

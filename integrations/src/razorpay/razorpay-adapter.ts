@@ -23,9 +23,11 @@ import {
   RazorpayWebhookPayloadSchema,
   RazorpayPaymentEntitySchema,
   RazorpayOrderEntitySchema,
+  RazorpayPaymentLinkEntitySchema,
   type RazorpayWebhookPayload,
   type RazorpayPaymentEntity,
   type RazorpayOrderEntity,
+  type RazorpayPaymentLinkEntity,
 } from "./razorpay-schemas.js";
 
 export interface RazorpayAdapterOptions {
@@ -72,8 +74,22 @@ export class RazorpayProviderAdapter
           notes: order.notes || {},
           created_at: order.created_at,
         };
+      } else if (webhookParse.data.payload.payment_link?.entity) {
+        const plink = webhookParse.data.payload.payment_link.entity;
+        paymentEntity = {
+          id: plink.id,
+          entity: "payment",
+          amount: plink.amount ?? 0,
+          currency: plink.currency || "INR",
+          status: plink.status === "paid" ? "captured" : "created",
+          order_id: plink.order_id || null,
+          invoice_id: plink.id,
+          method: "other",
+          notes: plink.notes || {},
+          created_at: plink.created_at || Math.floor(Date.now() / 1000),
+        };
       } else {
-        throw new Error("Webhook payload missing payment or order entity");
+        throw new Error("Webhook payload missing payment, order, or payment_link entity");
       }
     } else {
       // 2. Try parsing as direct Payment Entity
@@ -97,10 +113,28 @@ export class RazorpayProviderAdapter
             created_at: order.created_at,
           };
         } else {
-          // Bubble up actionable validation error from webhookParse
-          throw new Error(
-            `Invalid Razorpay payload: ${webhookParse.error.issues.map((i) => i.message).join(", ")}`
-          );
+          // 4. Try parsing as direct Payment Link Entity
+          const plinkParse = RazorpayPaymentLinkEntitySchema.safeParse(rawEvent);
+          if (plinkParse.success) {
+            const plink = plinkParse.data;
+            paymentEntity = {
+              id: plink.id,
+              entity: "payment",
+              amount: plink.amount ?? 0,
+              currency: plink.currency || "INR",
+              status: plink.status === "paid" ? "captured" : "created",
+              order_id: plink.order_id || null,
+              invoice_id: plink.id,
+              method: "other",
+              notes: plink.notes || {},
+              created_at: plink.created_at || Math.floor(Date.now() / 1000),
+            };
+          } else {
+            // Bubble up actionable validation error from webhookParse
+            throw new Error(
+              `Invalid Razorpay payload: ${webhookParse.error.issues.map((i) => i.message).join(", ")}`
+            );
+          }
         }
       }
     }
@@ -109,12 +143,13 @@ export class RazorpayProviderAdapter
     // 3. Extract and resolve identifiers
     const externalPaymentId = paymentEntity.id.trim();
 
-    const companyId = (
-      options?.companyId ||
-      (paymentEntity.notes?.company_id as string) ||
-      (paymentEntity.notes?.companyId as string) ||
-      "demo_company_001"
-    ).trim();
+    const companyId = options?.companyId
+      ? options.companyId.trim()
+      : paymentEntity.notes?.company_id
+      ? String(paymentEntity.notes.company_id).trim()
+      : paymentEntity.notes?.companyId
+      ? String(paymentEntity.notes.companyId).trim()
+      : undefined;
 
     const providerId = (
       options?.providerId ||
@@ -338,31 +373,35 @@ export class RazorpayProviderAdapter
     const normalizedSource = (source || "").toLowerCase().trim();
     const normalizedStep = (step || "").toLowerCase().trim();
     const responseCode = acquirerData?.response_code ? String(acquirerData.response_code).trim() : "";
+    const hasAll = (words: string[]) => words.every((w) => new RegExp(`\\b${w}\\b`).test(combined));
+    const hasAny = (phrases: string[]) => phrases.some((p) => combined.includes(p));
 
     // 1. INSUFFICIENT_FUNDS (funds/limit shortage, ISO 51)
     if (
       responseCode === "51" ||
-      combined.includes("insufficient funds") ||
-      combined.includes("low balance") ||
-      combined.includes("insufficient balance") ||
+      hasAll(["insufficient", "funds"]) ||
+      hasAll(["low", "balance"]) ||
+      hasAll(["insufficient", "balance"]) ||
       combined.includes("exceeds balance") ||
-      combined.includes("not enough funds") ||
-      combined.includes("credit limit exceeded") ||
-      combined.includes("balance insufficient") ||
-      combined.includes("nsf")
+      hasAll(["not", "enough", "funds"]) ||
+      hasAll(["credit", "limit"]) ||
+      hasAll(["balance", "insufficient"]) ||
+      /\bnsf\b/.test(combined)
     ) {
       return "INSUFFICIENT_FUNDS";
     }
 
-    // 2. AUTHENTICATION (failed OTP, 3D secure, wrong pin, mpin, authentication step)
+    // 2. AUTHENTICATION (failed OTP, 3D secure, wrong pin, mpin, authentication step/required)
     if (
       normalizedStep === "payment_authentication" ||
       combined.includes("auth failed") ||
       combined.includes("authentication failed") ||
-      combined.includes("otp") ||
+      hasAll(["authentication", "required"]) ||
+      hasAll(["otp", "required"]) ||
+      /\botp\b/.test(combined) ||
       combined.includes("3d secure") ||
-      combined.includes("3ds") ||
-      combined.includes("mfa") ||
+      /\b3ds\b/.test(combined) ||
+      /\bmfa\b/.test(combined) ||
       combined.includes("wrong pin") ||
       combined.includes("incorrect pin") ||
       combined.includes("invalid pin") ||
@@ -372,21 +411,63 @@ export class RazorpayProviderAdapter
       return "AUTHENTICATION";
     }
 
-    // 3. NETWORK (timeouts, connectivity, gateway socket errors)
+    // 3. Unambiguous card-specific acquirer response codes. Checked ahead of the
+    // coarser BANK source signal: a specific ISO response code (e.g. 54 = expired
+    // card) is stronger evidence than knowing only that the response came from
+    // "the bank" generically.
+    if (responseCode === "54" || responseCode === "41" || responseCode === "43") {
+      return "CARD";
+    }
+
+    // 4. BANK — evidence specifically tied to the bank/issuer/account. Checked
+    // ahead of the generic NETWORK/CARD text-based categories so bank-specific
+    // timeouts, outages, and closures are attributed to the bank rather than misfiled.
     if (
-      combined.includes("timeout") ||
-      combined.includes("timed out") ||
-      combined.includes("network error") ||
-      combined.includes("gateway timeout") ||
-      combined.includes("connection") ||
-      combined.includes("socket") ||
-      combined.includes("switch timeout") ||
-      combined.includes("psp timeout")
+      normalizedSource === "bank" ||
+      responseCode === "05" ||
+      hasAll(["bank", "timeout"]) ||
+      hasAll(["bank", "unavailable"]) ||
+      hasAll(["bank", "offline"]) ||
+      hasAll(["bank", "down"]) ||
+      hasAll(["issuer", "unavailable"]) ||
+      hasAll(["issuer", "timeout"]) ||
+      combined.includes("bank error") ||
+      combined.includes("bank declined") ||
+      combined.includes("bank server") ||
+      combined.includes("issuer declined") ||
+      combined.includes("declined by issuer") ||
+      combined.includes("bank debit failed") ||
+      hasAll(["account", "closed"]) ||
+      hasAll(["bank", "closed"]) ||
+      hasAll(["account", "blocked"]) ||
+      combined.includes("account frozen") ||
+      combined.includes("do not honor") ||
+      combined.includes("do not honour")
+    ) {
+      return "BANK";
+    }
+
+    // 5. NETWORK (timeouts, connectivity, gateway socket errors not tied to the bank)
+    if (
+      hasAny([
+        "timed out",
+        "network error",
+        "gateway timeout",
+        "switch timeout",
+        "psp timeout",
+        "socket timeout",
+        "connection reset",
+        "connection failed",
+      ]) ||
+      hasAll(["network", "timeout"]) ||
+      hasAll(["connection", "timeout"]) ||
+      (combined.includes("timeout") && !combined.includes("bank")) ||
+      combined.includes("socket")
     ) {
       return "NETWORK";
     }
 
-    // 4. CARD (card expired, invalid card number, blocked, card declined, ISO 54)
+    // 6. CARD (remaining text-based signals; ISO 54/41/43 response codes handled in step 3)
     if (
       responseCode === "54" ||
       combined.includes("card expired") ||
@@ -397,6 +478,9 @@ export class RazorpayProviderAdapter
       combined.includes("declined by card") ||
       combined.includes("lost card") ||
       combined.includes("stolen card") ||
+      hasAll(["card", "blocked"]) ||
+      hasAll(["card", "restricted"]) ||
+      hasAll(["card", "pickup"]) ||
       combined.includes("invalid cvv") ||
       combined.includes("incorrect cvv") ||
       combined.includes("restricted card") ||
@@ -405,7 +489,7 @@ export class RazorpayProviderAdapter
       return "CARD";
     }
 
-    // 5. CUSTOMER_ACTION_REQUIRED (user cancelled, dropped off, invalid VPA, mandate consent)
+    // 7. CUSTOMER_ACTION_REQUIRED (user cancelled, dropped off, invalid VPA, mandate consent)
     if (
       combined.includes("customer action required") ||
       combined.includes("user cancelled") ||
@@ -422,34 +506,18 @@ export class RazorpayProviderAdapter
       return "CUSTOMER_ACTION_REQUIRED";
     }
 
-    // 6. BANK (failure source is bank, bank-specific rejection, ISO 05)
-    if (
-      normalizedSource === "bank" ||
-      responseCode === "05" ||
-      combined.includes("bank error") ||
-      combined.includes("bank declined") ||
-      combined.includes("bank server") ||
-      combined.includes("bank unavailable") ||
-      combined.includes("issuer declined") ||
-      combined.includes("declined by issuer") ||
-      combined.includes("do not honor") ||
-      combined.includes("account blocked") ||
-      combined.includes("account frozen") ||
-      combined.includes("bank debit failed")
-    ) {
-      return "BANK";
-    }
-
-    // 7. PROVIDER (gateway / processor processing failure, or source is gateway/business)
+    // 8. PROVIDER (gateway / processor processing failure, or source is gateway/business).
+    // Requires specific gateway/processor evidence, not a bare "provider"/"error"
+    // combination — too generic, and would misfire on ambiguous messages such as
+    // "unknown provider error".
     if (
       normalizedSource === "gateway" ||
       normalizedSource === "business" ||
       combined.includes("gateway error") ||
       combined.includes("processor error") ||
       combined.includes("internal gateway error") ||
-      combined.includes("provider unavailable") ||
-      combined.includes("provider outage") ||
-      combined.includes("gateway outage") ||
+      hasAll(["provider", "unavailable"]) ||
+      hasAll(["gateway", "outage"]) ||
       combined.includes("acquirer down") ||
       combined.includes("route not found") ||
       code?.toUpperCase() === "GATEWAY_ERROR" ||
@@ -458,7 +526,7 @@ export class RazorpayProviderAdapter
       return "PROVIDER";
     }
 
-    // 8. TEMPORARY (transient conditions)
+    // 9. TEMPORARY (transient conditions)
     if (
       combined.includes("temporary") ||
       combined.includes("transient") ||
@@ -470,6 +538,7 @@ export class RazorpayProviderAdapter
       return "TEMPORARY";
     }
 
+    // 10. Default: UNKNOWN — insufficient evidence to safely classify. Do not guess.
     return "UNKNOWN";
   }
 

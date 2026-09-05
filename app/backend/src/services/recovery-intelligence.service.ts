@@ -31,7 +31,8 @@ export class RecoveryIntelligenceService {
     let reasoning = "";
 
     // PERMANENT is a hard safety boundary. A permanently classified failure
-    // can never become an automatic recovery target in this phase.
+    // can never become an automatic recovery target in this phase, regardless
+    // of how broad its category is.
     if (
       classification === "PERMANENT" &&
       category !== "AUTHENTICATION" &&
@@ -40,8 +41,7 @@ export class RecoveryIntelligenceService {
       worthiness = "DO_NOT_RECOVER";
       estimatedRecoverableAmount = 0;
       confidence = 0.95;
-      reasoning =
-        `The failure is classified as permanent (${category}). Automated recovery is not recommended.`;
+      reasoning = this.permanentReasoning(category);
 
       return this.buildResult(
         worthiness,
@@ -134,11 +134,14 @@ export class RecoveryIntelligenceService {
         break;
 
       case "CARD":
-        worthiness = "DO_NOT_RECOVER";
-        estimatedRecoverableAmount = 0;
-        confidence = 0.95;
+        // Reaches here only when the failure analysis found no specific evidence
+        // of a permanent card condition (an ambiguous/generic card decline).
+        // A broad CARD category alone must not be assumed permanent.
+        worthiness = "REVIEW";
+        estimatedRecoverableAmount = originalAmount;
+        confidence = 0.4;
         reasoning =
-          "The failure indicates an invalidated, expired, lost, or stolen card. Automated recovery on this payment method is not recommended.";
+          "The card was declined without conclusive evidence of a permanent condition (e.g., expired, invalid, lost, stolen, or blocked). Manual review is recommended before attempting recovery.";
         break;
 
       case "BANK":
@@ -174,6 +177,22 @@ export class RecoveryIntelligenceService {
       confidence,
       reasoning
     );
+  }
+
+  /**
+   * Category-specific explanation for a PERMANENT classification. Kept distinct
+   * from the switch statement above so this reasoning is reachable regardless
+   * of category, since the PERMANENT safety boundary returns before the switch.
+   */
+  private permanentReasoning(category: string): string {
+    switch (category) {
+      case "CARD":
+        return "The failure indicates a permanent card condition: an invalidated, expired, lost, or stolen card. Automated recovery on this payment method is not recommended.";
+      case "BANK":
+        return "The customer's bank account or card was permanently declined by the issuer (e.g., a closed account, blocked account, or an explicit do-not-honor response). Recovery is not recommended.";
+      default:
+        return `The failure is classified as permanent (${category}). Automated recovery is not recommended.`;
+    }
   }
 
   private buildResult(

@@ -58,7 +58,7 @@ export function DashboardHeader({
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <span className="font-medium text-foreground">{companyName}</span>
               <span>•</span>
-              <span className="text-[11px] text-muted-foreground font-mono">Scoped Tenant</span>
+              <span className="text-[11px] text-muted-foreground font-mono">Single Business / Razorpay Live</span>
             </div>
           </div>
         </div>

@@ -28,6 +28,7 @@ import {
 } from "@recoverai/contracts";
 import { DemoRecoveryAdapter, RazorpayRecoveryAdapter } from "@recoverai/integrations";
 import { prisma as defaultPrisma } from "../lib/prisma.js";
+import { dashboardEventService } from "./dashboard-event.service.js";
 
 export class IneligibleRecoveryError extends Error {
   readonly code = "INELIGIBLE_RECOVERY_ACTION";
@@ -99,13 +100,6 @@ export class RecoveryExecutionService {
     const payment = recommendation.paymentEvent;
     const assessment = payment.assessment;
     const action = recommendation.action as RecoveryAction;
-
-    // 3. Tenant Isolation Check: Verify company ownership
-    if (callerCompanyId && payment.companyId !== callerCompanyId) {
-      throw new TenantIsolationError(
-        `Tenant isolation violation: payment event '${payment.id}' belongs to company '${payment.companyId}', not '${callerCompanyId}'`
-      );
-    }
 
     // 4. Execution Eligibility Check
     // Only RETRY_PAYMENT is eligible for execution
@@ -365,7 +359,6 @@ export class RecoveryExecutionService {
     const canonicalEvent: CanonicalPaymentEvent =
       CanonicalPaymentEventSchema.parse({
         externalPaymentId: payment.externalPaymentId,
-        companyId: payment.companyId,
         providerId: payment.providerId,
         customerReference: payment.customerReference,
         amount: Number(payment.amount),
@@ -466,6 +459,14 @@ export class RecoveryExecutionService {
       }
     );
 
+    dashboardEventService.emitDashboardEvent({
+      type: "RECOVERY_EXECUTED",
+      paymentEventId: payment.id,
+      recoveryAttemptId: attempt.id,
+      status: attempt.status,
+      timestamp: new Date().toISOString(),
+    });
+
     return {
       status: "EXECUTED",
       isExecuted: true,
@@ -491,7 +492,7 @@ export class RecoveryExecutionService {
    * Strictly verifies tenant context and prevents duplicate crediting (idempotency).
    */
   async confirmRecoveryFromProvider(params: {
-    companyId: string;
+    companyId?: string;
     providerPaymentId: string;
     confirmedAmount: number;
     currency: string;
@@ -512,11 +513,8 @@ export class RecoveryExecutionService {
     actualRecoveredAmount?: number | null;
     message?: string;
   }> {
-    // 1. Search for matching RecoveryAttempt within company scope
+    // 1. Search for matching RecoveryAttempt
     const openAttempts = await this.db.recoveryAttempt.findMany({
-      where: {
-        paymentEvent: { companyId: params.companyId },
-      },
       include: {
         paymentEvent: true,
         outcome: true,
@@ -727,13 +725,30 @@ export class RecoveryExecutionService {
         });
       }
 
+      // Update RecoveryRecommendation to EXECUTED
+      if (isSuccess) {
+        await tx.recoveryRecommendation.updateMany({
+          where: { paymentEventId: matchedAttempt.paymentEventId },
+          data: { status: "EXECUTED" },
+        });
+      }
+
       return { attempt: updatedAttempt, outcome };
     }, {
       timeout: 30000,
       maxWait: 15000,
     });
 
-
+    dashboardEventService.emitDashboardEvent({
+      type: "RECOVERY_CONFIRMED",
+      companyId: params.companyId,
+      paymentEventId: matchedAttempt.paymentEventId,
+      recoveryAttemptId: result.attempt.id,
+      recoveryOutcomeId: result.outcome.id,
+      status: result.outcome.outcome,
+      actualRecoveredAmount: Number(result.outcome.actualRecoveredAmount ?? 0),
+      timestamp: new Date().toISOString(),
+    });
 
     return {
       isRecovery: true,

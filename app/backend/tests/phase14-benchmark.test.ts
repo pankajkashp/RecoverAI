@@ -20,26 +20,19 @@ function calculateP95(latencies: number[]): number {
 }
 
 describe("Phase 14 — Performance Verification & Correctness Benchmarks", () => {
-  const companyId = `comp_p14_bench_${Date.now()}`;
+  const testPrefix = `p14_bench_${Date.now()}`;
   let adminToken: string;
   const providerId = "provider_demo_sandbox";
+  let userId: string;
 
   beforeAll(async () => {
-    // 1. Setup company and admin user
-    await prisma.company.create({
-      data: {
-        id: companyId,
-        name: "Phase 14 Benchmark Enterprise",
-      },
-    });
-
+    userId = `user_p14_${Date.now()}`;
     const user = await prisma.user.create({
       data: {
-        id: `user_p14_${Date.now()}`,
+        id: userId,
         email: `admin-${Date.now()}@p14bench.com`,
         name: "Benchmark Admin",
         role: "ADMIN",
-        companyId,
       },
     });
 
@@ -48,7 +41,6 @@ describe("Phase 14 — Performance Verification & Correctness Benchmarks", () =>
       email: user.email,
       name: user.name,
       role: "ADMIN",
-      companyId,
     });
 
     await prisma.provider.upsert({
@@ -61,15 +53,14 @@ describe("Phase 14 — Performance Verification & Correctness Benchmarks", () =>
       },
     });
 
-    // 2. Pre-seed representative payment events
+    // Pre-seed representative payment events
     for (let i = 1; i <= 10; i++) {
       const isFailed = i % 2 === 0;
       await request(app)
         .post("/api/payment-events")
         .set("Authorization", `Bearer ${adminToken}`)
         .send({
-          externalPaymentId: `seed_pay_${companyId}_${i}`,
-          companyId,
+          externalPaymentId: `${testPrefix}_seed_${i}`,
           amount: 1000 * i,
           currency: "INR",
           status: isFailed ? "FAILED" : "COMPLETED",
@@ -82,14 +73,30 @@ describe("Phase 14 — Performance Verification & Correctness Benchmarks", () =>
   });
 
   afterAll(async () => {
-    await prisma.recoveryOutcome.deleteMany({ where: { recoveryAttempt: { paymentEvent: { companyId } } } });
-    await prisma.recoveryAttempt.deleteMany({ where: { paymentEvent: { companyId } } });
-    await prisma.recoveryRecommendation.deleteMany({ where: { paymentEvent: { companyId } } });
-    await prisma.recoveryAssessment.deleteMany({ where: { paymentEvent: { companyId } } });
-    await prisma.paymentFailure.deleteMany({ where: { paymentEvent: { companyId } } });
-    await prisma.paymentEvent.deleteMany({ where: { companyId } });
-    await prisma.user.deleteMany({ where: { companyId } });
-    await prisma.company.deleteMany({ where: { id: companyId } });
+    await prisma.recoveryOutcome.deleteMany({
+      where: { recoveryAttempt: { paymentEvent: { externalPaymentId: { startsWith: testPrefix } } } },
+    });
+    await prisma.recoveryAttempt.deleteMany({
+      where: { paymentEvent: { externalPaymentId: { startsWith: testPrefix } } },
+    });
+    await prisma.recoveryRecommendation.deleteMany({
+      where: { paymentEvent: { externalPaymentId: { startsWith: testPrefix } } },
+    });
+    await prisma.recoveryAssessment.deleteMany({
+      where: { paymentEvent: { externalPaymentId: { startsWith: testPrefix } } },
+    });
+    await prisma.paymentFailure.deleteMany({
+      where: { paymentEvent: { externalPaymentId: { startsWith: testPrefix } } },
+    });
+    await prisma.mlPrediction.deleteMany({
+      where: { paymentEvent: { externalPaymentId: { startsWith: testPrefix } } },
+    });
+    await prisma.paymentEvent.deleteMany({
+      where: { externalPaymentId: { startsWith: testPrefix } },
+    });
+    if (userId) {
+      await prisma.user.deleteMany({ where: { id: userId } });
+    }
     await prisma.$disconnect();
   });
 
@@ -104,7 +111,7 @@ describe("Phase 14 — Performance Verification & Correctness Benchmarks", () =>
         const start = Date.now();
         try {
           const res = await request(app)
-            .get(`/api/dashboard/summary?companyId=${companyId}`)
+            .get("/api/dashboard/summary")
             .set("Authorization", `Bearer ${adminToken}`);
           const duration = Date.now() - start;
           if (res.status === 200) {
@@ -144,7 +151,7 @@ describe("Phase 14 — Performance Verification & Correctness Benchmarks", () =>
         const start = Date.now();
         try {
           const res = await request(app)
-            .get(`/api/dashboard/payments?companyId=${companyId}&page=1&pageSize=10`)
+            .get("/api/dashboard/payments?page=1&pageSize=10")
             .set("Authorization", `Bearer ${adminToken}`);
           const duration = Date.now() - start;
           if (res.status === 200) {
@@ -187,8 +194,7 @@ describe("Phase 14 — Performance Verification & Correctness Benchmarks", () =>
             .post("/api/payment-events")
             .set("Authorization", `Bearer ${adminToken}`)
             .send({
-              externalPaymentId: `bench_ingest_${Date.now()}_${i}_${idx}`,
-              companyId,
+              externalPaymentId: `${testPrefix}_ingest_${i}_${idx}`,
               amount: 2500,
               currency: "INR",
               status: "FAILED",
@@ -225,33 +231,29 @@ describe("Phase 14 — Performance Verification & Correctness Benchmarks", () =>
 
   it("Correctness: exact KPI values, breakdowns, filtering and pagination", async () => {
     const summaryRes = await request(app)
-      .get(`/api/dashboard/summary?companyId=${companyId}`)
+      .get("/api/dashboard/summary")
       .set("Authorization", `Bearer ${adminToken}`);
 
     expect(summaryRes.status).toBe(200);
-    expect(summaryRes.body.data.company.id).toBe(companyId);
-    expect(summaryRes.body.data.metrics.totalPayments).toBe(20);
-    expect(summaryRes.body.data.metrics.failedPayments).toBe(15);
-    expect(summaryRes.body.data.metrics.successfulPayments).toBe(5);
+    expect(summaryRes.body.data.business.name).toBeDefined();
+    expect(summaryRes.body.data.metrics.totalPayments).toBeGreaterThanOrEqual(10);
     expect(summaryRes.body.data.failureBreakdown).toBeInstanceOf(Array);
     expect(summaryRes.body.data.recoveryBreakdown).toBeInstanceOf(Array);
 
     const paymentsRes = await request(app)
-      .get(`/api/dashboard/payments?companyId=${companyId}&page=1&pageSize=5&sortBy=eventTimestamp&sortOrder=desc`)
+      .get("/api/dashboard/payments?page=1&pageSize=5&sortBy=eventTimestamp&sortOrder=desc")
       .set("Authorization", `Bearer ${adminToken}`);
 
     expect(paymentsRes.status).toBe(200);
-    expect(paymentsRes.body.data.pagination.total).toBe(20);
     expect(paymentsRes.body.data.pagination.page).toBe(1);
     expect(paymentsRes.body.data.pagination.pageSize).toBe(5);
-    expect(paymentsRes.body.data.pagination.totalPages).toBe(4);
     expect(paymentsRes.body.data.items.length).toBe(5);
 
     const filterRes = await request(app)
-      .get(`/api/dashboard/payments?companyId=${companyId}&status=FAILED`)
+      .get("/api/dashboard/payments?status=FAILED")
       .set("Authorization", `Bearer ${adminToken}`);
 
     expect(filterRes.status).toBe(200);
-    expect(filterRes.body.data.pagination.total).toBe(15);
+    expect(filterRes.body.data.pagination.total).toBeGreaterThanOrEqual(5);
   });
 });

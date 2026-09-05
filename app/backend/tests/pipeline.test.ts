@@ -43,7 +43,6 @@ describe("Phase 3 — PaymentPipelineService", () => {
   it("persists a valid new canonical payment event", async () => {
     const event: CanonicalPaymentEvent = {
       externalPaymentId: testExternalId,
-      companyId: "demo_company_001",
       providerId: "provider_demo_sandbox",
       customerReference: "cust_test_pipeline",
       amount: 3499.0,
@@ -82,7 +81,6 @@ describe("Phase 3 — PaymentPipelineService", () => {
   it("safely handles duplicate payment events (idempotency)", async () => {
     const duplicateEvent: CanonicalPaymentEvent = {
       externalPaymentId: testExternalId,
-      companyId: "demo_company_001",
       providerId: "provider_demo_sandbox",
       amount: 3499.0,
       currency: "INR",
@@ -107,28 +105,9 @@ describe("Phase 3 — PaymentPipelineService", () => {
     expect(count).toBe(1);
   });
 
-  it("rejects payment event when company does not exist", async () => {
-    const invalidCompanyEvent: CanonicalPaymentEvent = {
-      externalPaymentId: `pay_invalid_comp_${Date.now()}`,
-      companyId: "non_existent_company_9999",
-      providerId: "provider_demo_sandbox",
-      amount: 100.0,
-      currency: "INR",
-      status: "COMPLETED",
-      paymentMethod: "CARD",
-      eventType: "PAYMENT_COMPLETED",
-      eventTimestamp: new Date(),
-    };
-
-    await expect(
-      pipelineService.processEvent(invalidCompanyEvent)
-    ).rejects.toThrowError(/Company not found/);
-  });
-
   it("rejects payment event when provider does not exist", async () => {
     const invalidProviderEvent: CanonicalPaymentEvent = {
       externalPaymentId: `pay_invalid_prov_${Date.now()}`,
-      companyId: "demo_company_001",
       providerId: "non_existent_provider_9999",
       amount: 100.0,
       currency: "INR",

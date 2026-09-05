@@ -31,8 +31,7 @@ export class RecoveryAttemptController {
     next: NextFunction
   ): Promise<void> => {
     try {
-      const companyId = req.tenant?.companyId;
-      const result = await this.executionService.executeRecovery(req.body, companyId);
+      const result = await this.executionService.executeRecovery(req.body);
 
       // Return 200 for idempotent duplicate calls, 201 for new executions
       const statusCode = result.isExecuted ? 201 : 200;

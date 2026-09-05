@@ -25,6 +25,7 @@ import { prisma as defaultPrisma } from "../lib/prisma.js";
 import { FailureAnalysisService } from "./failure-analysis.service.js";
 import { RecoveryIntelligenceService } from "./recovery-intelligence.service.js";
 import { RecoveryRecommendationService } from "./recovery-recommendation.service.js";
+import { dashboardEventService } from "./dashboard-event.service.js";
 
 export class PaymentPipelineService {
   constructor(
@@ -45,13 +46,12 @@ export class PaymentPipelineService {
     const event: CanonicalPaymentEvent =
       CanonicalPaymentEventSchema.parse(rawCanonicalEvent);
 
-    // 2. Idempotency Check: Query existing by compound unique [providerId, externalPaymentId, companyId]
+    // 2. Idempotency Check: Query existing by compound unique [providerId, externalPaymentId]
     const existing = await this.db.paymentEvent.findUnique({
       where: {
-        provider_external_company_unique: {
+        provider_external_unique: {
           providerId: event.providerId,
           externalPaymentId: event.externalPaymentId,
-          companyId: event.companyId,
         },
       },
       include: {
@@ -104,12 +104,21 @@ export class PaymentPipelineService {
           return { updPayment, btStatus, btAttribution };
         });
 
+        dashboardEventService.emitDashboardEvent({
+          type: "PAYMENT_PROCESSED",
+          companyId: event.companyId,
+          paymentEventId: updated.updPayment.id,
+          businessTransactionId: updated.updPayment.businessTransactionId || undefined,
+          status: updated.updPayment.status,
+          timestamp: new Date().toISOString(),
+        });
+
         return {
           status: "CREATED",
           isDuplicate: false,
           paymentEventId: updated.updPayment.id,
           externalPaymentId: updated.updPayment.externalPaymentId,
-          companyId: updated.updPayment.companyId,
+          companyId: event.companyId,
           providerId: updated.updPayment.providerId,
           businessTransactionId: updated.updPayment.businessTransactionId || undefined,
           businessTransactionStatus: updated.btStatus,
@@ -131,7 +140,7 @@ export class PaymentPipelineService {
         isDuplicate: true,
         paymentEventId: existing.id,
         externalPaymentId: existing.externalPaymentId,
-        companyId: existing.companyId,
+        companyId: event.companyId,
         providerId: existing.providerId,
         businessTransactionId: existing.businessTransactionId || undefined,
         amount: existing.amount.toString(),
@@ -171,16 +180,7 @@ export class PaymentPipelineService {
       };
     }
 
-    // 3. Verify Foreign Entity Existence
-    const company = await this.db.company.findUnique({
-      where: { id: event.companyId },
-    });
-    if (!company) {
-      const error = new Error(`Company not found: '${event.companyId}'`);
-      (error as unknown as { code: string }).code = "COMPANY_NOT_FOUND";
-      throw error;
-    }
-
+    // 3. Verify Provider Existence
     const provider = await this.db.provider.findUnique({
       where: { id: event.providerId },
     });
@@ -220,23 +220,19 @@ export class PaymentPipelineService {
         // Resolve or create BusinessTransaction
         let businessTransaction = null;
 
-        // Priority 1: Match by merchantReference within company
+        // Priority 1: Match by merchantReference
         if (event.merchantTransactionReference) {
-          businessTransaction = await tx.businessTransaction.findUnique({
+          businessTransaction = await tx.businessTransaction.findFirst({
             where: {
-              company_merchant_ref_unique: {
-                companyId: event.companyId,
-                merchantReference: event.merchantTransactionReference,
-              },
+              merchantReference: event.merchantTransactionReference,
             },
           });
         }
 
-        // Priority 2: Match by orderReference within company
+        // Priority 2: Match by orderReference
         if (!businessTransaction && event.orderReference) {
           businessTransaction = await tx.businessTransaction.findFirst({
             where: {
-              companyId: event.companyId,
               orderReference: event.orderReference,
             },
           });
@@ -247,7 +243,6 @@ export class PaymentPipelineService {
         if (!businessTransaction) {
           businessTransaction = await tx.businessTransaction.create({
             data: {
-              companyId: event.companyId,
               merchantReference: event.merchantTransactionReference || null,
               orderReference: event.orderReference || null,
               amount: new Prisma.Decimal(event.amount),
@@ -309,7 +304,6 @@ export class PaymentPipelineService {
         const paymentRecord = await tx.paymentEvent.create({
           data: {
             externalPaymentId: event.externalPaymentId,
-            companyId: event.companyId,
             providerId: event.providerId,
             businessTransactionId: businessTransaction.id,
             orderReference: event.orderReference || null,
@@ -351,23 +345,29 @@ export class PaymentPipelineService {
           businessTransaction.status === "SUCCESSFUL" ||
           businessTransaction.status === "RECOVERED";
 
+        let createdAssessment = null;
+        let createdRecommendation = null;
+
         if (recoveryAssessment && !isTxResolved) {
-          await tx.recoveryAssessment.create({
+          createdAssessment = await tx.recoveryAssessment.create({
             data: {
               paymentEventId: paymentRecord.id,
               worthiness: recoveryAssessment.worthiness,
-              estimatedRecoverableAmount: new Prisma.Decimal(
-                recoveryAssessment.estimatedRecoverableAmount
-              ),
+              estimatedRecoverableAmount:
+                recoveryAssessment.estimatedRecoverableAmount > 0
+                  ? new Prisma.Decimal(
+                      recoveryAssessment.estimatedRecoverableAmount
+                    )
+                  : null,
               confidence: recoveryAssessment.confidence,
               reasoning: recoveryAssessment.reasoning,
-              assessedAt: recoveryAssessment.assessedAt,
+              assessedAt: new Date(recoveryAssessment.assessedAt),
             },
           });
         }
 
         if (recommendation && !isTxResolved) {
-          await tx.recoveryRecommendation.create({
+          createdRecommendation = await tx.recoveryRecommendation.create({
             data: {
               paymentEventId: paymentRecord.id,
               action: recommendation.action,
@@ -378,26 +378,43 @@ export class PaymentPipelineService {
           });
         }
 
-        return { paymentRecord, businessTransaction };
+        return {
+          payment: paymentRecord,
+          businessTransaction,
+          failure: failureAnalysis,
+          assessment: createdAssessment,
+          recommendation: createdRecommendation,
+        };
       }, {
         timeout: 30000,
         maxWait: 15000,
       });
 
+      dashboardEventService.emitDashboardEvent({
+        type: "PAYMENT_PROCESSED",
+        companyId: event.companyId,
+        paymentEventId: created.payment.id,
+        businessTransactionId: created.businessTransaction.id,
+        status: created.payment.status,
+        timestamp: new Date().toISOString(),
+      });
+
       return {
         status: "CREATED",
         isDuplicate: false,
-        paymentEventId: created.paymentRecord.id,
-        externalPaymentId: created.paymentRecord.externalPaymentId,
-        companyId: created.paymentRecord.companyId,
-        providerId: created.paymentRecord.providerId,
-        businessTransactionId: created.paymentRecord.businessTransactionId || undefined,
+        paymentEventId: created.payment.id,
+        externalPaymentId: created.payment.externalPaymentId,
+        companyId: event.companyId,
+        providerId: created.payment.providerId,
+        businessTransactionId: created.businessTransaction.id,
         businessTransactionStatus: created.businessTransaction.status,
         recoveryAttribution: created.businessTransaction.recoveryAttribution,
-        amount: created.paymentRecord.amount.toString(),
-        currency: created.paymentRecord.currency,
-        paymentStatus: created.paymentRecord.status,
-        message: "Canonical payment event successfully validated and persisted.",
+        amount: created.payment.amount.toString(),
+        currency: created.payment.currency,
+        paymentStatus: created.payment.status,
+        message: isFailed
+          ? "Failed payment event processed, analyzed, and recovery assessment persisted."
+          : "Payment event processed and persisted successfully.",
         failureAnalysis: failureAnalysis
           ? {
               category: failureAnalysis.category,
@@ -436,10 +453,9 @@ export class PaymentPipelineService {
       ) {
         const duplicate = await this.db.paymentEvent.findUnique({
           where: {
-            provider_external_company_unique: {
+            provider_external_unique: {
               providerId: event.providerId,
               externalPaymentId: event.externalPaymentId,
-              companyId: event.companyId,
             },
           },
           include: {
@@ -455,7 +471,7 @@ export class PaymentPipelineService {
             isDuplicate: true,
             paymentEventId: duplicate.id,
             externalPaymentId: duplicate.externalPaymentId,
-            companyId: duplicate.companyId,
+            companyId: event.companyId,
             providerId: duplicate.providerId,
             businessTransactionId: duplicate.businessTransactionId || undefined,
             amount: duplicate.amount.toString(),

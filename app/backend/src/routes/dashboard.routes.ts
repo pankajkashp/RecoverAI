@@ -14,6 +14,7 @@ export function createDashboardRouter(
 
   router.get("/summary", controller.handleGetSummary);
   router.get("/payments", controller.handleGetPayments);
+  router.get("/events", controller.handleEventsStream);
 
   return router;
 }

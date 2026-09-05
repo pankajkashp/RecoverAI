@@ -66,13 +66,13 @@ describe("Phase 3 — DemoAdapter & ProviderRegistry", () => {
     ).toThrow();
   });
 
-  it("throws a validation error when company ID is missing", () => {
-    expect(() =>
-      adapter.normalize({
-        external_payment_id: "pay_123",
-        amount: 500,
-      })
-    ).toThrow();
+  it("allows normalizing when company ID is omitted in single-business mode", () => {
+    const normalized = adapter.normalize({
+      external_payment_id: "pay_123",
+      amount: 500,
+    });
+    expect(normalized.externalPaymentId).toBe("pay_123");
+    expect(normalized.amount).toBe(500);
   });
 
   it("throws a validation error when amount is non-positive", () => {

@@ -80,13 +80,6 @@ export const DemoRawPaymentEventSchema = z
       message: "external_payment_id or externalPaymentId is required",
       path: ["externalPaymentId"],
     }
-  )
-  .refine(
-    (data) => Boolean(data.company_id || data.companyId),
-    {
-      message: "company_id or companyId is required",
-      path: ["companyId"],
-    }
   );
 
 export type DemoRawPaymentEvent = z.infer<typeof DemoRawPaymentEventSchema>;
@@ -106,7 +99,7 @@ export class DemoAdapter implements IProviderAdapter<DemoRawPaymentEvent | unkno
     const externalPaymentId = (
       parsed.externalPaymentId || parsed.external_payment_id
     )!.trim();
-    const companyId = (parsed.companyId || parsed.company_id)!.trim();
+    const companyId = parsed.companyId?.trim() || parsed.company_id?.trim() || undefined;
     const providerId = (
       parsed.providerId ||
       parsed.provider_id ||

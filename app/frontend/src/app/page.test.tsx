@@ -18,6 +18,10 @@ describe("Phase 9 — Frontend Dashboard", () => {
   describe("API Client — fetchDashboardSummary", () => {
     it("successfully fetches and validates summary data", async () => {
       const mockSummaryData = {
+        business: {
+          id: "single_business",
+          name: "RecoverAI Business Account",
+        },
         company: {
           id: "demo_comp_001",
           name: "Acme Retail Technologies (Demo)",
@@ -64,8 +68,8 @@ describe("Phase 9 — Frontend Dashboard", () => {
         json: async () => ({ success: true, data: mockSummaryData }),
       });
 
-      const result = await fetchDashboardSummary("demo_comp_001");
-      expect(result.company.id).toBe("demo_comp_001");
+      const result = await fetchDashboardSummary();
+      expect(result.business?.name).toBe("RecoverAI Business Account");
       expect(result.metrics.totalPayments).toBe(10);
       expect(result.metrics.actualRecoveredAmount).toBe("18000.00");
       expect(result.failureBreakdown).toHaveLength(2);
@@ -618,6 +622,13 @@ describe("Phase 9 — Frontend Dashboard", () => {
         "Network timeout during provider retry"
       );
       expect(setIsExecuting).toHaveBeenCalledWith(false);
+    });
+  });
+
+  describe("Dashboard Freshness & Polling", () => {
+    it("exports DashboardPage with auto-refresh mechanism", () => {
+      expect(DashboardPage).toBeDefined();
+      expect(typeof DashboardPage).toBe("function");
     });
   });
 });

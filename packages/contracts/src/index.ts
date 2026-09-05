@@ -160,12 +160,9 @@ export const CanonicalPaymentEventSchema = z.object({
   merchantTransactionReference: z.string().trim().nullish(),
 
   /**
-   * RecoverAI internal company identifier that owns this transaction.
+   * Optional company identifier (legacy compatibility).
    */
-  companyId: z
-    .string()
-    .min(1, "companyId must not be empty")
-    .trim(),
+  companyId: z.string().trim().optional(),
 
   /**
    * Internal provider record ID or recognized provider identifier.
@@ -345,7 +342,7 @@ export interface PaymentPipelineResult {
   isDuplicate: boolean;
   paymentEventId: string;
   externalPaymentId: string;
-  companyId: string;
+  companyId?: string;
   providerId: string;
   businessTransactionId?: string;
   businessTransactionStatus?: BusinessTransactionStatus;
@@ -528,10 +525,18 @@ export type RecoveryBreakdownItem = z.infer<typeof RecoveryBreakdownItemSchema>;
  * Dashboard Summary API response payload.
  */
 export const DashboardSummaryResponseSchema = z.object({
-  company: z.object({
-    id: z.string(),
-    name: z.string(),
-  }),
+  business: z
+    .object({
+      id: z.string(),
+      name: z.string(),
+    })
+    .optional(),
+  company: z
+    .object({
+      id: z.string(),
+      name: z.string(),
+    })
+    .optional(),
   currency: z.string().min(3).max(3),
   isDemo: z.boolean().default(true),
   metrics: z.object({
@@ -600,7 +605,7 @@ export type DashboardPaymentsQueryOutput = z.infer<
 export const PaymentLifecycleItemSchema = z.object({
   id: z.string(),
   externalPaymentId: z.string(),
-  companyId: z.string(),
+  companyId: z.string().optional(),
   providerId: z.string(),
   providerType: ProviderTypeEnum,
   businessTransactionId: z.string().nullish(),
@@ -698,7 +703,7 @@ export const AuthUserSchema = z.object({
   email: z.string().email(),
   name: z.string().min(1),
   role: UserRoleEnum,
-  companyId: z.string().min(1),
+  companyId: z.string().optional(),
   createdAt: z.coerce.date().optional(),
 });
 export type AuthUser = z.infer<typeof AuthUserSchema>;

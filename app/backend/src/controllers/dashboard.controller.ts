@@ -11,6 +11,7 @@ import { Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { DashboardPaymentsQuerySchema } from "@recoverai/contracts";
 import { DashboardService } from "../services/dashboard.service.js";
+import { dashboardEventService } from "../services/dashboard-event.service.js";
 
 const DashboardSummaryQuerySchema = z.object({
   companyId: z.string().trim().optional(),
@@ -103,6 +104,51 @@ export class DashboardController {
         return;
       }
 
+      next(error);
+    }
+  };
+
+  /**
+   * GET /api/dashboard/events
+   * Server-Sent Events (SSE) endpoint providing real-time dashboard events.
+   */
+  handleEventsStream = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      // Configure SSE Headers
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+
+      // Send initial connection handshake
+      res.write(
+        `event: connected\ndata: ${JSON.stringify({ status: "connected", connectedAt: new Date().toISOString() })}\n\n`
+      );
+
+      // Subscribe to global dashboard events
+      const unsubscribe = dashboardEventService.subscribe((event) => {
+        res.write(
+          `event: dashboard_update\ndata: ${JSON.stringify(event)}\n\n`
+        );
+      });
+
+      // Keep connection alive with periodic heartbeat (every 20s)
+      const heartbeat = setInterval(() => {
+        res.write(": keep-alive\n\n");
+      }, 20000);
+
+      // Cleanup on client disconnect
+      req.on("close", () => {
+        clearInterval(heartbeat);
+        unsubscribe();
+      });
+    } catch (error: unknown) {
       next(error);
     }
   };

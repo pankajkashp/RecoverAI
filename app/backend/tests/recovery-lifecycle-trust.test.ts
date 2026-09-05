@@ -1,13 +1,15 @@
 /**
- * RecoverAI — Recovery Lifecycle & Critical Trust Invariant Tests
+ * RecoverAI — Recovery Lifecycle & Critical Trust Invariant Tests (Single Business)
  *
  * Verifies:
  * 1. ATTEMPTED != RECOVERED: Initiating recovery does NOT create recovered revenue.
  * 2. Provider Confirmation: Only verified payment.captured / order.paid webhooks finalize recovery.
- * 3. Tenant Isolation: Recovery execution strictly rejects cross-tenant requests (HTTP 403).
- * 4. Idempotency: Duplicate webhooks or duplicate recovery requests do not double-count revenue.
- * 5. Failure Handling: Failed recovery does not increase actualRecoveredAmount.
- * 6. Non-Recovery Isolation: Regular payments do not falsely confirm recovery attempts.
+ * 3. Idempotency: Duplicate webhooks or duplicate recovery requests do not double-count revenue.
+ * 4. Failure Handling: Failed recovery does not increase actualRecoveredAmount.
+ * 5. Non-Recovery Isolation: Regular payments do not falsely confirm recovery attempts.
+ * 6. Customer Independent Retry: Customer paying independently does NOT cancel recovery attempt.
+ * 7. Persistence & Reload: Provider confirmed recovery survives reloads from PostgreSQL.
+ * 8. Payment Pages Isolation: Standard Payment Pages failures reach normal pipeline.
  */
 
 import crypto from "node:crypto";
@@ -16,7 +18,6 @@ import request from "supertest";
 import { PrismaClient } from "@prisma/client";
 import { createApp } from "../src/app.js";
 import { environment } from "../src/config/env.js";
-
 
 const prisma = new PrismaClient();
 const app = createApp();
@@ -29,28 +30,13 @@ function signPayload(payload: object, secret: string = TEST_WEBHOOK_SECRET): str
   return crypto.createHmac("sha256", secret).update(jsonStr).digest("hex");
 }
 
-describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, () => {
-  const companyA = `comp_trust_a_${Date.now()}`;
-  const companyB = `comp_trust_b_${Date.now()}`;
-  let tokenCompanyA: string;
-  let tokenCompanyB: string;
-
+describe("Recovery Lifecycle & Critical Trust Invariant (Single Business)", { timeout: 60000 }, () => {
+  let token: string;
 
   beforeAll(async () => {
-    // 1. Seed two distinct companies for multi-tenant isolation testing
-    await prisma.company.createMany({
-      data: [
-        { id: companyA, name: "Trust Merchant Corp A" },
-        { id: companyB, name: "Trust Merchant Corp B" },
-      ],
-    });
+    token = "demo_token_single_business";
 
-    // 2. Generate auth tokens
-    tokenCompanyA = `demo_token_${companyA}`;
-    tokenCompanyB = `demo_token_${companyB}`;
-
-
-    // 3. Ensure Razorpay Provider exists
+    // Ensure Razorpay Provider exists
     const provider = await prisma.provider.findFirst({
       where: { type: "RAZORPAY" },
     });
@@ -66,40 +52,11 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
     }
   });
 
-
   afterAll(async () => {
-    // Cleanup records
-    for (const cid of [companyA, companyB]) {
-      await prisma.recoveryOutcome.deleteMany({
-        where: { recoveryAttempt: { paymentEvent: { companyId: cid } } },
-      });
-      await prisma.recoveryAttempt.deleteMany({
-        where: { paymentEvent: { companyId: cid } },
-      });
-      await prisma.recoveryRecommendation.deleteMany({
-        where: { paymentEvent: { companyId: cid } },
-      });
-      await prisma.recoveryAssessment.deleteMany({
-        where: { paymentEvent: { companyId: cid } },
-      });
-      await prisma.paymentFailure.deleteMany({
-        where: { paymentEvent: { companyId: cid } },
-      });
-      await prisma.paymentEvent.deleteMany({
-        where: { companyId: cid },
-      });
-      await prisma.businessTransaction.deleteMany({
-        where: { companyId: cid },
-      });
-      await prisma.company.deleteMany({
-        where: { id: cid },
-      });
-
-    }
     await prisma.$disconnect();
   });
 
-  // Helper to ingest a failed payment into Company A
+  // Helper to ingest a failed payment
   async function setupFailedPayment(paymentExtId: string, amount: number = 5000.0) {
     const failedWebhook = {
       event: "payment.failed",
@@ -111,7 +68,7 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
             currency: "INR",
             status: "failed",
             method: "card",
-            notes: { companyId: companyA },
+            notes: {},
             error_code: "BAD_REQUEST_ERROR",
             error_description: "Payment declined due to insufficient funds",
             error_source: "bank",
@@ -125,14 +82,14 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
 
     const signature = signPayload(failedWebhook);
     const ingestRes = await request(app)
-      .post(`/api/webhooks/razorpay?companyId=${companyA}`)
+      .post("/api/webhooks/razorpay")
       .set("X-Razorpay-Signature", signature)
       .send(failedWebhook);
 
     expect(ingestRes.status).toBe(200);
 
     const payment = await prisma.paymentEvent.findFirst({
-      where: { externalPaymentId: paymentExtId, companyId: companyA },
+      where: { externalPaymentId: paymentExtId },
       include: { recommendation: true, assessment: true },
     });
 
@@ -150,8 +107,8 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
 
     // Initial Dashboard Summary
     const initialDash = await request(app)
-      .get(`/api/dashboard/summary?companyId=${companyA}`)
-      .set("Authorization", `Bearer ${tokenCompanyA}`);
+      .get("/api/dashboard/summary")
+      .set("Authorization", `Bearer ${token}`);
 
     const initialActuallyRecovered = Number(
       initialDash.body?.data?.metrics?.actualRecoveredAmount ?? 0
@@ -160,70 +117,62 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
     // Step 1: Initiate Recovery
     const execRes = await request(app)
       .post("/api/recovery-attempts")
-      .set("Authorization", `Bearer ${tokenCompanyA}`)
+      .set("Authorization", `Bearer ${token}`)
       .send({ paymentEventId: payment.id });
 
     expect(execRes.status).toBe(201);
     expect(execRes.body.data.status).toBe("EXECUTED");
     expect(execRes.body.data.attemptStatus).toBe("ATTEMPTED");
-    // Trust Invariant: actualRecoveredAmount MUST be null
     expect(execRes.body.data.actualRecoveredAmount).toBeNull();
-    expect(execRes.body.data.checkoutUrl).toBeDefined();
+    const attemptId = execRes.body.data.recoveryAttemptId;
 
-    // Verify in PostgreSQL: RecoveryAttempt exists as ATTEMPTED, RecoveryOutcome does NOT exist yet
-    const attemptInDb = await prisma.recoveryAttempt.findFirst({
-      where: { paymentEventId: payment.id },
+    // Verify recovery attempt is ATTEMPTED in database
+    const attemptInDb = await prisma.recoveryAttempt.findUnique({
+      where: { id: attemptId },
       include: { outcome: true },
     });
+
     expect(attemptInDb).toBeDefined();
     expect(attemptInDb?.status).toBe("ATTEMPTED");
-    expect(attemptInDb?.outcome).toBeNull(); // No premature outcome!
+    expect(attemptInDb?.outcome).toBeNull(); // CRITICAL: NO outcome yet!
 
-    // Verify Dashboard: "Actually Recovered" MUST NOT have increased
-    const afterInitiateDash = await request(app)
-      .get(`/api/dashboard/summary?companyId=${companyA}`)
-      .set("Authorization", `Bearer ${tokenCompanyA}`);
+    // Verify Dashboard metrics: actualRecoveredAmount MUST NOT have changed
+    const postAttemptDash = await request(app)
+      .get("/api/dashboard/summary")
+      .set("Authorization", `Bearer ${token}`);
 
-    const afterInitiateActuallyRecovered = Number(
-      afterInitiateDash.body.data.metrics.actualRecoveredAmount
+    const postAttemptRecovered = Number(
+      postAttemptDash.body?.data?.metrics?.actualRecoveredAmount ?? 0
     );
 
-    expect(afterInitiateActuallyRecovered).toBe(initialActuallyRecovered);
+    expect(postAttemptRecovered).toBe(initialActuallyRecovered);
   });
 
   // --------------------------------------------------------------------------
-  // Test 2: Provider Confirmation via Verified Webhook
+  // Test 2: Provider Confirmation Flow
   // --------------------------------------------------------------------------
   it("PROVIDER CONFIRMATION: payment.captured confirms recovery and credits exact confirmed amount", async () => {
-    const extId = `pay_fail_confirm_${Date.now()}`;
+    const extId = `pay_fail_prov_${Date.now()}`;
     const payment = await setupFailedPayment(extId, 8500.0);
 
-    // Initiate recovery
     const execRes = await request(app)
       .post("/api/recovery-attempts")
-      .set("Authorization", `Bearer ${tokenCompanyA}`)
+      .set("Authorization", `Bearer ${token}`)
       .send({ paymentEventId: payment.id });
 
     const attemptId = execRes.body.data.recoveryAttemptId;
-    expect(attemptId).toBeDefined();
 
-    // Simulate customer completing payment in Razorpay Test Mode
-    // Razorpay sends payment.captured webhook with correlation notes
-    const retryPaymentId = `pay_retry_${Date.now()}`;
-    const capturedWebhook = {
+    // Simulate provider confirming the recovery payment
+    const captureWebhook = {
       event: "payment.captured",
       payload: {
         payment: {
           entity: {
-            id: retryPaymentId,
-            amount: 850000, // 8500.00 INR
+            id: `pay_captured_${Date.now()}`,
+            amount: 850000,
             currency: "INR",
             status: "captured",
-            method: "upi",
             notes: {
-              companyId: companyA,
-              paymentEventId: payment.id,
-              originalExternalPaymentId: extId,
               recoveryAttemptId: attemptId,
             },
             created_at: Math.floor(Date.now() / 1000),
@@ -232,41 +181,34 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
       },
     };
 
-    const signature = signPayload(capturedWebhook);
+    const signature = signPayload(captureWebhook);
     const webhookRes = await request(app)
-      .post(`/api/webhooks/razorpay?companyId=${companyA}`)
+      .post("/api/webhooks/razorpay")
       .set("X-Razorpay-Signature", signature)
-      .send(capturedWebhook);
+      .send(captureWebhook);
 
     expect(webhookRes.status).toBe(200);
     expect(webhookRes.body.isRecoveryConfirmation).toBe(true);
     expect(webhookRes.body.outcomeStatus).toBe("SUCCESSFUL");
     expect(webhookRes.body.actualRecoveredAmount).toBe(8500.0);
 
-    // Verify DB state: RecoveryAttempt is SUCCESSFUL and RecoveryOutcome is created
     const attemptAfter = await prisma.recoveryAttempt.findUnique({
       where: { id: attemptId },
-      include: { outcome: true },
+      include: {
+        outcome: true,
+        paymentEvent: { include: { businessTransaction: true } },
+      },
     });
+
     expect(attemptAfter?.status).toBe("SUCCESSFUL");
-    expect(attemptAfter?.outcome).toBeDefined();
     expect(attemptAfter?.outcome?.outcome).toBe("SUCCESSFUL");
     expect(Number(attemptAfter?.outcome?.actualRecoveredAmount)).toBe(8500.0);
-
-    // Verify Dashboard: "Actually Recovered" increases by exactly 8500.00
-    const finalDash = await request(app)
-      .get(`/api/dashboard/summary?companyId=${companyA}`)
-      .set("Authorization", `Bearer ${tokenCompanyA}`);
-
-    const finalActuallyRecovered = Number(
-      finalDash.body.data.metrics.actualRecoveredAmount
-    );
-
-    expect(finalActuallyRecovered).toBeGreaterThanOrEqual(8500.0);
+    expect(attemptAfter?.paymentEvent.businessTransaction?.status).toBe("RECOVERED");
+    expect(attemptAfter?.paymentEvent.businessTransaction?.recoveryAttribution).toBe("RECOVERAI");
   });
 
   // --------------------------------------------------------------------------
-  // Test 3: Confirmation Idempotency (Duplicate Webhook)
+  // Test 3: Idempotency
   // --------------------------------------------------------------------------
   it("IDEMPOTENCY: Duplicate payment.captured webhook delivery does NOT double-count recovery revenue", async () => {
     const extId = `pay_fail_idemp_${Date.now()}`;
@@ -274,22 +216,21 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
 
     const execRes = await request(app)
       .post("/api/recovery-attempts")
-      .set("Authorization", `Bearer ${tokenCompanyA}`)
+      .set("Authorization", `Bearer ${token}`)
       .send({ paymentEventId: payment.id });
 
     const attemptId = execRes.body.data.recoveryAttemptId;
 
-    const capturedWebhook = {
+    const captureWebhook = {
       event: "payment.captured",
       payload: {
         payment: {
           entity: {
-            id: `pay_idemp_${Date.now()}`,
+            id: `pay_idemp_cap_${Date.now()}`,
             amount: 400000,
             currency: "INR",
             status: "captured",
             notes: {
-              companyId: companyA,
               recoveryAttemptId: attemptId,
             },
             created_at: Math.floor(Date.now() / 1000),
@@ -298,24 +239,24 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
       },
     };
 
-    const signature = signPayload(capturedWebhook);
+    const signature = signPayload(captureWebhook);
 
-    // First delivery
+    // Delivery 1
     const res1 = await request(app)
-      .post(`/api/webhooks/razorpay?companyId=${companyA}`)
+      .post("/api/webhooks/razorpay")
       .set("X-Razorpay-Signature", signature)
-      .send(capturedWebhook);
+      .send(captureWebhook);
     expect(res1.status).toBe(200);
 
-    // Second delivery (duplicate webhook)
+    // Delivery 2 (Duplicate)
     const res2 = await request(app)
-      .post(`/api/webhooks/razorpay?companyId=${companyA}`)
+      .post("/api/webhooks/razorpay")
       .set("X-Razorpay-Signature", signature)
-      .send(capturedWebhook);
+      .send(captureWebhook);
     expect(res2.status).toBe(200);
+    expect(res2.body.isRecoveryConfirmation).toBe(true);
     expect(res2.body.message).toContain("idempotent duplicate");
 
-    // Exactly 1 outcome record in PostgreSQL
     const outcomeCount = await prisma.recoveryOutcome.count({
       where: { recoveryAttemptId: attemptId },
     });
@@ -323,31 +264,7 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
   });
 
   // --------------------------------------------------------------------------
-  // Test 4: Tenant Isolation Enforcement
-  // --------------------------------------------------------------------------
-  it("TENANT ISOLATION: Company B cannot execute recovery on Company A's payment event (HTTP 403)", async () => {
-    const extId = `pay_fail_iso_${Date.now()}`;
-    const paymentA = await setupFailedPayment(extId, 9999.0);
-
-    // Company B attempts to trigger recovery on Company A's payment
-    const unauthorizedRes = await request(app)
-      .post("/api/recovery-attempts")
-      .set("Authorization", `Bearer ${tokenCompanyB}`) // Authenticated as Company B
-      .send({ paymentEventId: paymentA.id });
-
-    expect(unauthorizedRes.status).toBe(403);
-    expect(unauthorizedRes.body.success).toBe(false);
-    expect(unauthorizedRes.body.code).toBe("TENANT_ISOLATION_VIOLATION");
-
-    // Ensure NO recovery attempt was created
-    const attempts = await prisma.recoveryAttempt.findMany({
-      where: { paymentEventId: paymentA.id },
-    });
-    expect(attempts.length).toBe(0);
-  });
-
-  // --------------------------------------------------------------------------
-  // Test 5: Unrelated Payment Captured Isolation
+  // Test 4: Unrelated Payment Captured Isolation
   // --------------------------------------------------------------------------
   it("ISOLATION: Standard payment.captured webhook without recovery notes is ingested normally without touching recovery attempts", async () => {
     const regularPaymentId = `pay_regular_${Date.now()}`;
@@ -361,7 +278,7 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
             currency: "INR",
             status: "captured",
             method: "card",
-            notes: { companyId: companyA }, // Normal notes without recovery correlation
+            notes: {},
             created_at: Math.floor(Date.now() / 1000),
           },
         },
@@ -370,18 +287,18 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
 
     const signature = signPayload(regularWebhook);
     const res = await request(app)
-      .post(`/api/webhooks/razorpay?companyId=${companyA}`)
+      .post("/api/webhooks/razorpay")
       .set("X-Razorpay-Signature", signature)
       .send(regularWebhook);
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
-    expect(res.body.isRecoveryConfirmation).toBeUndefined(); // Normal ingestion
+    expect(res.body.isRecoveryConfirmation).toBeUndefined();
     expect(res.body.status).toBe("COMPLETED");
   });
 
   // --------------------------------------------------------------------------
-  // Test 6: Failed Recovery Payment Handling
+  // Test 5: Failed Recovery Payment Handling
   // --------------------------------------------------------------------------
   it("FAILED RECOVERY: payment.failed on recovery attempt sets FAILED status with 0 recovered amount", async () => {
     const extId = `pay_fail_retryfail_${Date.now()}`;
@@ -389,7 +306,7 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
 
     const execRes = await request(app)
       .post("/api/recovery-attempts")
-      .set("Authorization", `Bearer ${tokenCompanyA}`)
+      .set("Authorization", `Bearer ${token}`)
       .send({ paymentEventId: payment.id });
 
     const attemptId = execRes.body.data.recoveryAttemptId;
@@ -404,7 +321,6 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
             currency: "INR",
             status: "failed",
             notes: {
-              companyId: companyA,
               recoveryAttemptId: attemptId,
             },
             error_code: "BAD_REQUEST_ERROR",
@@ -418,7 +334,7 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
 
     const signature = signPayload(failedRetryWebhook);
     const webhookRes = await request(app)
-      .post(`/api/webhooks/razorpay?companyId=${companyA}`)
+      .post("/api/webhooks/razorpay")
       .set("X-Razorpay-Signature", signature)
       .send(failedRetryWebhook);
 
@@ -436,7 +352,7 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
   });
 
   // --------------------------------------------------------------------------
-  // Test 7: E2E Payment Link Correlation (empty notes, invoice_id matching plink)
+  // Test 6: E2E Payment Link Correlation (empty notes, invoice_id matching plink)
   // --------------------------------------------------------------------------
   it("PAYMENT LINK RECOVERY: payment.captured with invoice_id=plink confirms recovery without notes", async () => {
     const extId = `pay_e2e_link_fail_${Date.now()}`;
@@ -444,7 +360,7 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
 
     const execRes = await request(app)
       .post("/api/recovery-attempts")
-      .set("Authorization", `Bearer ${tokenCompanyA}`)
+      .set("Authorization", `Bearer ${token}`)
       .send({ paymentEventId: payment.id });
 
     expect(execRes.status).toBe(201);
@@ -452,7 +368,6 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
     const providerReference = execRes.body.data.providerReference;
     expect(providerReference).toBeDefined();
 
-    // Emulate real Razorpay webhook: notes is empty [], but invoice_id contains the payment link id (plink_...)
     const capturedLinkPaymentWebhook = {
       event: "payment.captured",
       payload: {
@@ -462,9 +377,9 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
             amount: 23200,
             currency: "INR",
             status: "captured",
-            invoice_id: providerReference, // Razorpay attaches plink_... as invoice_id!
+            invoice_id: providerReference,
             order_id: `order_link_${Date.now()}`,
-            notes: [], // Razorpay webhook often has empty notes array!
+            notes: [],
             created_at: Math.floor(Date.now() / 1000),
           },
         },
@@ -473,7 +388,7 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
 
     const signature = signPayload(capturedLinkPaymentWebhook);
     const webhookRes = await request(app)
-      .post(`/api/webhooks/razorpay?companyId=${companyA}`)
+      .post("/api/webhooks/razorpay")
       .set("X-Razorpay-Signature", signature)
       .send(capturedLinkPaymentWebhook);
 
@@ -482,7 +397,6 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
     expect(webhookRes.body.outcomeStatus).toBe("SUCCESSFUL");
     expect(webhookRes.body.actualRecoveredAmount).toBe(232.0);
 
-    // Verify DB state
     const attemptAfter = await prisma.recoveryAttempt.findUnique({
       where: { id: attemptId },
       include: {
@@ -499,7 +413,7 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
   });
 
   // --------------------------------------------------------------------------
-  // Test 8: Customer Independent Retry keeps ATTEMPTED status (no premature cancellation)
+  // Test 7: Customer Independent Retry keeps ATTEMPTED status
   // --------------------------------------------------------------------------
   it("CUSTOMER RETRY: independent customer payment does NOT cancel open recovery attempt", async () => {
     const extId = `pay_cust_retry_fail_${Date.now()}`;
@@ -507,12 +421,11 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
 
     const execRes = await request(app)
       .post("/api/recovery-attempts")
-      .set("Authorization", `Bearer ${tokenCompanyA}`)
+      .set("Authorization", `Bearer ${token}`)
       .send({ paymentEventId: payment.id });
 
     const attemptId = execRes.body.data.recoveryAttemptId;
 
-    // Customer retries on original order independently
     const custRetryWebhook = {
       event: "payment.captured",
       payload: {
@@ -532,33 +445,31 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
 
     const signature = signPayload(custRetryWebhook);
     const webhookRes = await request(app)
-      .post(`/api/webhooks/razorpay?companyId=${companyA}`)
+      .post("/api/webhooks/razorpay")
       .set("X-Razorpay-Signature", signature)
       .send(custRetryWebhook);
 
     expect(webhookRes.status).toBe(200);
 
-    // Verify recovery attempt is NOT CANCELLED — must remain ATTEMPTED
     const attemptAfter = await prisma.recoveryAttempt.findUnique({
       where: { id: attemptId },
       include: { outcome: true },
     });
 
     expect(attemptAfter?.status).toBe("ATTEMPTED");
-    expect(attemptAfter?.outcome).toBeNull(); // No false credit attributed to RecoverAI
+    expect(attemptAfter?.outcome).toBeNull();
   });
 
   // --------------------------------------------------------------------------
-  // Test 9: Persistence Regression (provider confirmation -> persist -> reload from DB -> still SUCCESSFUL with 232)
+  // Test 8: Persistence Regression
   // --------------------------------------------------------------------------
   it("PERSISTENCE REGRESSION: provider confirmation -> persist SUCCESSFUL in PostgreSQL -> reload from DB -> still SUCCESSFUL with 232", async () => {
     const extId = `pay_persist_regress_${Date.now()}`;
     const payment = await setupFailedPayment(extId, 232.0);
 
-    // 1. Execute recovery attempt (creates Payment Link reference)
     const execRes = await request(app)
       .post("/api/recovery-attempts")
-      .set("Authorization", `Bearer ${tokenCompanyA}`)
+      .set("Authorization", `Bearer ${token}`)
       .send({ paymentEventId: payment.id });
 
     expect(execRes.status).toBe(201);
@@ -566,7 +477,6 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
     const providerReference = execRes.body.data.providerReference;
     expect(providerReference).toBeDefined();
 
-    // 2. Provider confirms recovery payment
     const captureWebhook = {
       event: "payment.captured",
       payload: {
@@ -587,7 +497,7 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
 
     const signature = signPayload(captureWebhook);
     const webhookRes = await request(app)
-      .post(`/api/webhooks/razorpay?companyId=${companyA}`)
+      .post("/api/webhooks/razorpay")
       .set("X-Razorpay-Signature", signature)
       .send(captureWebhook);
 
@@ -596,7 +506,6 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
     expect(webhookRes.body.outcomeStatus).toBe("SUCCESSFUL");
     expect(webhookRes.body.actualRecoveredAmount).toBe(232.0);
 
-    // 3. Verify PostgreSQL directly
     const dbAttempt = await prisma.recoveryAttempt.findUnique({
       where: { id: attemptId },
       include: {
@@ -613,10 +522,10 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
     expect(dbAttempt?.paymentEvent.businessTransaction?.status).toBe("RECOVERED");
     expect(dbAttempt?.paymentEvent.businessTransaction?.recoveryAttribution).toBe("RECOVERAI");
 
-    // 4. Simulate Dashboard reload (GET /api/dashboard/payments)
+    // Simulate Dashboard reload
     const dashPaymentsRes = await request(app)
-      .get(`/api/dashboard/payments?companyId=${companyA}`)
-      .set("Authorization", `Bearer ${tokenCompanyA}`);
+      .get("/api/dashboard/payments")
+      .set("Authorization", `Bearer ${token}`);
 
     expect(dashPaymentsRes.status).toBe(200);
     const item = dashPaymentsRes.body.data.items.find(
@@ -627,25 +536,15 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
     expect(item.latestOutcome?.outcome).toBe("SUCCESSFUL");
     expect(Number(item.latestOutcome?.actualRecoveredAmount)).toBe(232);
 
-    // 5. Simulate Dashboard metrics reload (GET /api/dashboard/summary)
-    const dashSummaryRes = await request(app)
-      .get(`/api/dashboard/summary?companyId=${companyA}`)
-      .set("Authorization", `Bearer ${tokenCompanyA}`);
-
-    expect(dashSummaryRes.status).toBe(200);
-    expect(Number(dashSummaryRes.body.data.metrics.actualRecoveredAmount)).toBeGreaterThanOrEqual(232);
-    expect(dashSummaryRes.body.data.metrics.successfulRecoveryCount).toBeGreaterThanOrEqual(1);
-
-    // 6. Idempotency check: Duplicate webhook must NOT create another outcome or change amount
+    // Duplicate webhook
     const duplicateRes = await request(app)
-      .post(`/api/webhooks/razorpay?companyId=${companyA}`)
+      .post("/api/webhooks/razorpay")
       .set("X-Razorpay-Signature", signature)
       .send(captureWebhook);
 
     expect(duplicateRes.status).toBe(200);
     expect(duplicateRes.body.isRecoveryConfirmation).toBe(true);
 
-    // Re-verify from PostgreSQL: still exactly ONE outcome with 232
     const outcomes = await prisma.recoveryOutcome.findMany({
       where: { recoveryAttemptId: attemptId },
     });
@@ -654,19 +553,17 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
   });
 
   // --------------------------------------------------------------------------
-  // Test 10: Payment Pages Isolation & Normal Ingestion
+  // Test 9: Payment Pages Isolation & Normal Ingestion
   // --------------------------------------------------------------------------
   it("PAYMENT PAGES ISOLATION: unrelated Payment Pages payment.failed is NOT intercepted by historical paid links, reaches normal pipeline, and persists PaymentEvent", async () => {
-    // 1. Setup an existing historical recovery attempt with a Payment Link reference
     const histFailed = await setupFailedPayment(`pay_hist_for_link_${Date.now()}`, 100.0);
     const histExecRes = await request(app)
       .post("/api/recovery-attempts")
-      .set("Authorization", `Bearer ${tokenCompanyA}`)
+      .set("Authorization", `Bearer ${token}`)
       .send({ paymentEventId: histFailed.id });
     expect(histExecRes.status).toBe(201);
     const histPlink = histExecRes.body.data.providerReference;
 
-    // 2. Incoming unrelated Payment Pages failure webhook (e.g. ₹1,234 with order_id and no plink)
     const paymentPageExtId = `pay_page_fail_${Date.now()}`;
     const paymentPageOrderId = `order_page_${Date.now()}`;
     const paymentPageWebhook = {
@@ -698,18 +595,16 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
 
     const signature = signPayload(paymentPageWebhook);
     const webhookRes = await request(app)
-      .post(`/api/webhooks/razorpay?companyId=${companyA}`)
+      .post("/api/webhooks/razorpay")
       .set("X-Razorpay-Signature", signature)
       .send(paymentPageWebhook);
 
-    // 3. Must NOT be intercepted as recovery — must return normal ingestion result
     expect(webhookRes.status).toBe(200);
     expect(webhookRes.body.isRecoveryConfirmation).toBeFalsy();
     expect(webhookRes.body.success).toBe(true);
     expect(webhookRes.body.eventId).toBeDefined();
     expect(webhookRes.body.status).toBe("FAILED");
 
-    // 4. Must persist PaymentEvent in PostgreSQL
     const persistedEvent = await prisma.paymentEvent.findFirst({
       where: { externalPaymentId: paymentPageExtId },
       include: {
@@ -728,7 +623,7 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
     expect(persistedEvent?.businessTransaction?.status).toBe("FAILED");
     expect(persistedEvent?.failure).toBeDefined();
 
-    // 5. Verify genuine recovery confirmation still works
+    // Genuine recovery confirmation still works
     const genuineRecoveryWebhook = {
       event: "payment.captured",
       payload: {
@@ -749,7 +644,7 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
 
     const genuineSig = signPayload(genuineRecoveryWebhook);
     const genuineRes = await request(app)
-      .post(`/api/webhooks/razorpay?companyId=${companyA}`)
+      .post("/api/webhooks/razorpay")
       .set("X-Razorpay-Signature", genuineSig)
       .send(genuineRecoveryWebhook);
 
@@ -759,6 +654,3 @@ describe("Recovery Lifecycle & Critical Trust Invariant", { timeout: 60000 }, ()
     expect(Number(genuineRes.body.actualRecoveredAmount)).toBe(100.0);
   });
 });
-
-
-

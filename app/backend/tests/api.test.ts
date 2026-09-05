@@ -107,10 +107,10 @@ describe("Phase 3 — Ingestion REST API (POST /api/payment-events)", () => {
     expect(response.body.details).toBeDefined();
   });
 
-  it("returns 404 Not Found when company does not exist", async () => {
-    const payloadWithInvalidCompany = {
+  it("returns 404 Not Found when provider does not exist", async () => {
+    const payloadWithInvalidProvider = {
       external_payment_id: `pay_api_test_notfound_${Date.now()}`,
-      company_id: "non_existent_company_000000",
+      provider_id: "non_existent_provider_000000",
       amount: 100.0,
       currency: "INR",
       status: "COMPLETED",
@@ -118,11 +118,11 @@ describe("Phase 3 — Ingestion REST API (POST /api/payment-events)", () => {
 
     const response = await request(app)
       .post("/api/payment-events")
-      .send(payloadWithInvalidCompany);
+      .send(payloadWithInvalidProvider);
 
     expect(response.status).toBe(404);
     expect(response.body.success).toBe(false);
-    expect(response.body.code).toBe("COMPANY_NOT_FOUND");
+    expect(response.body.code).toBe("PROVIDER_NOT_FOUND");
   });
 
   it("confirms GET /health continues to operate as expected", async () => {

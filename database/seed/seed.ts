@@ -50,22 +50,11 @@ async function main() {
   await prisma.paymentEvent.deleteMany({});
   await prisma.provider.deleteMany({});
   await prisma.user.deleteMany({});
-  await prisma.company.deleteMany({});
 
-  // 2. Create Demo Company
-  const company = await prisma.company.create({
-    data: {
-      id: "demo_company_001",
-      name: "Acme Retail Technologies (Demo)",
-    },
-  });
-  console.log(`✓ Created demo company: ${company.name} (${company.id})`);
-
-  // 3. Create Demo Users
+  // 2. Create Demo Users
   const adminUser = await prisma.user.create({
     data: {
       id: "demo_user_admin",
-      companyId: company.id,
       name: "Demo Admin User",
       email: "admin@demo.recoverai.internal",
       role: UserRole.ADMIN,
@@ -75,7 +64,6 @@ async function main() {
   const memberUser = await prisma.user.create({
     data: {
       id: "demo_user_finance",
-      companyId: company.id,
       name: "Demo Finance Analyst",
       email: "finance@demo.recoverai.internal",
       role: UserRole.MEMBER,
@@ -83,7 +71,7 @@ async function main() {
   });
   console.log(`✓ Created demo users: ${adminUser.email}, ${memberUser.email}`);
 
-  // 4. Create Providers
+  // 3. Create Providers
   const demoProvider = await prisma.provider.create({
     data: {
       id: "provider_demo_sandbox",
@@ -104,14 +92,13 @@ async function main() {
   });
   console.log(`✓ Created providers: ${demoProvider.name}, ${futureRazorpayProvider.name}`);
 
-  // 5. Create Payment Events & Associated Records (Deterministic Synthetic Data)
+  // 4. Create Payment Events & Associated Records (Deterministic Synthetic Data)
 
   // --- Scenario 1: Successful Payment (No recovery needed) ---
   const payment1 = await prisma.paymentEvent.create({
     data: {
       id: "evt_demo_success_001",
       externalPaymentId: "pay_synth_001_success",
-      companyId: company.id,
       providerId: demoProvider.id,
       customerReference: "cust_demo_101",
       amount: new Prisma.Decimal("4500.00"),
@@ -130,7 +117,6 @@ async function main() {
     data: {
       id: "evt_demo_failed_002",
       externalPaymentId: "pay_synth_002_insufficient",
-      companyId: company.id,
       providerId: demoProvider.id,
       customerReference: "cust_demo_102",
       amount: new Prisma.Decimal("12500.00"),
@@ -216,7 +202,6 @@ async function main() {
     data: {
       id: "evt_demo_failed_003",
       externalPaymentId: "pay_synth_003_auth_timeout",
-      companyId: company.id,
       providerId: demoProvider.id,
       customerReference: "cust_demo_103",
       amount: new Prisma.Decimal("7800.00"),
@@ -289,7 +274,6 @@ async function main() {
     data: {
       id: "evt_demo_failed_004",
       externalPaymentId: "pay_synth_004_network_glitch",
-      companyId: company.id,
       providerId: demoProvider.id,
       customerReference: "cust_demo_104",
       amount: new Prisma.Decimal("2499.00"),
@@ -349,7 +333,6 @@ async function main() {
     data: {
       id: "evt_demo_failed_005",
       externalPaymentId: "pay_synth_005_lost_card",
-      companyId: company.id,
       providerId: demoProvider.id,
       customerReference: "cust_demo_105",
       amount: new Prisma.Decimal("55000.00"),

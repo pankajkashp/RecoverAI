@@ -141,30 +141,7 @@ export class RazorpayWebhookController {
         orderEntity.notes = orderNotes;
       }
 
-      // 5. Resolve Tenant Company Context
-      const companyId = (
-        (req.query.companyId as string) ||
-        (notes.company_id as string) ||
-        (notes.companyId as string) ||
-        req.tenant?.companyId ||
-        "demo_company_001"
-      ).trim();
-
-      // Ensure Company exists in DB
-      let company = await prisma.company.findUnique({
-        where: { id: companyId },
-      });
-      if (!company) {
-        // In sandbox / test mode, auto-create company if not present
-        company = await prisma.company.create({
-          data: {
-            id: companyId,
-            name: `Company ${companyId}`,
-          },
-        });
-      }
-
-      // 6. Resolve or Register Razorpay Provider in DB
+      // 5. Resolve or Register Razorpay Provider in DB
       let provider = await prisma.provider.findFirst({
         where: { type: "RAZORPAY" },
       });
@@ -179,11 +156,13 @@ export class RazorpayWebhookController {
         });
       }
 
-      // 7. Check for Recovery Confirmation (e.g. payment.captured for a recovery attempt)
+      // 6. Check for Recovery Confirmation (e.g. payment.captured or payment_link.paid for a recovery attempt)
       const confirmedAmount = paymentEntity
         ? Number((paymentEntity.amount / 100).toFixed(2))
         : orderEntity
-        ? Number(((orderEntity.amount_paid || orderEntity.amount) / 100).toFixed(2))
+        ? Number(((orderEntity.amount_paid ?? orderEntity.amount) / 100).toFixed(2))
+        : paymentLinkEntity
+        ? Number(((paymentLinkEntity.amount_paid ?? paymentLinkEntity.amount ?? 0) / 100).toFixed(2))
         : 0;
 
       const providerPaymentId =
@@ -193,11 +172,36 @@ export class RazorpayWebhookController {
         paymentLinkEntity?.id ||
         (paymentEntity?.invoice_id?.startsWith("plink_") ? paymentEntity.invoice_id : undefined);
 
+      const currency =
+        paymentEntity?.currency ||
+        orderEntity?.currency ||
+        paymentLinkEntity?.currency ||
+        "INR";
+
+      const providerReference =
+        paymentLinkId ||
+        (paymentEntity?.invoice_id?.startsWith("plink_") ? paymentEntity.invoice_id : undefined) ||
+        undefined;
+
+      const orderId =
+        paymentEntity?.order_id ||
+        orderEntity?.id ||
+        paymentLinkEntity?.order_id ||
+        undefined;
+
+      console.log("[Razorpay Webhook Accepted]", {
+        event: eventName,
+        providerPaymentId,
+        paymentLinkId,
+        orderId,
+        confirmedAmount,
+        currency,
+      });
+
       const recoveryResult = await this.recoveryExecutionService.confirmRecoveryFromProvider({
-        companyId: company.id,
         providerPaymentId,
         confirmedAmount,
-        currency: paymentEntity?.currency || orderEntity?.currency || "INR",
+        currency,
         event: eventName,
         recoveryAttemptId: (notes.recoveryAttemptId as string) || undefined,
         paymentEventId: (notes.paymentEventId as string) || undefined,
@@ -205,20 +209,22 @@ export class RazorpayWebhookController {
           (notes.originalExternalPaymentId as string) ||
           (notes.originalPaymentId as string) ||
           undefined,
-        providerReference:
-          paymentLinkId ||
-          paymentEntity?.invoice_id ||
-          paymentEntity?.order_id ||
-          orderEntity?.id ||
-          paymentEntity?.id,
+        providerReference,
         invoiceId: paymentEntity?.invoice_id || undefined,
-        orderId: paymentEntity?.order_id || orderEntity?.id || undefined,
+        orderId,
         paymentLinkId,
         notes: `Razorpay webhook: ${eventName} (${providerPaymentId})`,
       });
 
-
       if (recoveryResult.isRecovery) {
+        console.log("[Razorpay Webhook Recovery Matched & Confirmed]", {
+          recoveryAttemptId: recoveryResult.attemptId,
+          recoveryOutcomeId: recoveryResult.outcomeId,
+          outcomeStatus: recoveryResult.status,
+          actualRecoveredAmount: recoveryResult.actualRecoveredAmount,
+          message: recoveryResult.message,
+        });
+
         res.status(200).json({
           success: true,
           isRecoveryConfirmation: true,
@@ -232,7 +238,7 @@ export class RazorpayWebhookController {
         return;
       }
 
-      // 8. Normalize Razorpay Webhook Payload to CanonicalPaymentEvent
+      // 7. Normalize Razorpay Webhook Payload to CanonicalPaymentEvent for non-recovery ingestion
       let entityToNormalize: unknown = paymentEntity;
       if (!entityToNormalize && orderEntity) {
         entityToNormalize = {
@@ -246,15 +252,31 @@ export class RazorpayWebhookController {
           notes,
           created_at: orderEntity.created_at || Math.floor(Date.now() / 1000),
         };
+      } else if (!entityToNormalize && paymentLinkEntity) {
+        entityToNormalize = {
+          id: paymentLinkEntity.id,
+          entity: "payment",
+          amount: paymentLinkEntity.amount_paid ?? paymentLinkEntity.amount ?? 0,
+          currency: paymentLinkEntity.currency || "INR",
+          status: paymentLinkEntity.status === "paid" ? "captured" : "created",
+          order_id: paymentLinkEntity.order_id || null,
+          invoice_id: paymentLinkEntity.id,
+          method: "other",
+          notes,
+          created_at: paymentLinkEntity.created_at || Math.floor(Date.now() / 1000),
+        };
       }
 
       const canonicalEvent = this.adapter.normalize(entityToNormalize || req.body, {
-        companyId: company.id,
         providerId: provider.id,
         eventName,
         accountId: req.body?.account_id,
       });
 
+      console.log("[Razorpay Webhook Normal Payment Processed]", {
+        externalPaymentId: canonicalEvent.externalPaymentId,
+        status: canonicalEvent.status,
+      });
 
       // 8. Dispatch through Existing Core Payment Pipeline
       const result = await this.pipelineService.processEvent(canonicalEvent);

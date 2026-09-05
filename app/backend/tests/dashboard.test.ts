@@ -1,66 +1,63 @@
 /**
- * RecoverAI — Phase 9: Dashboard & Read API Tests
+ * RecoverAI — Dashboard & Read API Tests (Single Business)
  *
  * Tests the summary aggregation, paginated payment list, filtering,
- * server-side sorting, company scoping, and error handling.
+ * server-side sorting, single business summary, and SSE streaming.
  */
 
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import request from "supertest";
-import { PrismaClient, PaymentStatus, FailureCategory, RecoveryWorthiness, RecommendationStatus, RecoveryAttemptStatus, Prisma } from "@prisma/client";
+import {
+  PrismaClient,
+  PaymentStatus,
+  FailureCategory,
+  RecoveryWorthiness,
+  RecommendationStatus,
+  RecoveryAttemptStatus,
+  Prisma,
+} from "@prisma/client";
 import { createApp } from "../src/app.js";
 
 const prisma = new PrismaClient();
 const app = createApp();
 
-describe("Phase 9 — Dashboard & Read API", () => {
-  const testCompanyId = `test_comp_dash_${Date.now()}`;
-  const otherCompanyId = `test_comp_other_${Date.now()}`;
-  const emptyCompanyId = `test_comp_empty_${Date.now()}`;
-
+describe("Phase 9 — Dashboard & Read API (Single Business)", () => {
   let demoProviderId: string;
+  const createdPaymentIds: string[] = [];
 
   beforeAll(async () => {
-    // 1. Create test companies
-    await prisma.company.create({
-      data: {
-        id: testCompanyId,
-        name: "Dashboard Test Corp",
-      },
+    // 1. Create provider
+    let provider = await prisma.provider.findFirst({
+      where: { type: "DEMO" },
     });
-
-    await prisma.company.create({
-      data: {
-        id: otherCompanyId,
-        name: "Other Isolation Corp",
-      },
-    });
-
-    await prisma.company.create({
-      data: {
-        id: emptyCompanyId,
-        name: "Empty Test Corp",
-      },
-    });
-
-    // 2. Create provider
-    const provider = await prisma.provider.create({
-      data: {
-        id: `prov_dash_${Date.now()}`,
-        name: "Demo Sandbox Provider",
-        type: "DEMO",
-      },
-    });
+    if (!provider) {
+      provider = await prisma.provider.create({
+        data: {
+          id: `prov_dash_${Date.now()}`,
+          name: "Demo Sandbox Provider",
+          type: "DEMO",
+        },
+      });
+    }
     demoProviderId = provider.id;
 
-    // 3. Seed payments for testCompanyId
+    // 2. Clean previous test items if any
+    await prisma.recoveryOutcome.deleteMany({});
+    await prisma.recoveryAttempt.deleteMany({});
+    await prisma.recoveryRecommendation.deleteMany({});
+    await prisma.recoveryAssessment.deleteMany({});
+    await prisma.paymentFailure.deleteMany({});
+    await prisma.mlPrediction.deleteMany({});
+    await prisma.paymentEvent.deleteMany({});
+    await prisma.businessTransaction.deleteMany({});
+
+    // 3. Seed payments
 
     // Payment 1: COMPLETED (₹5,000)
-    await prisma.paymentEvent.create({
+    const pay1 = await prisma.paymentEvent.create({
       data: {
         id: `evt_dash_comp_${Date.now()}_1`,
         externalPaymentId: `ext_pay_1_${Date.now()}`,
-        companyId: testCompanyId,
         providerId: demoProviderId,
         amount: new Prisma.Decimal("5000.00"),
         currency: "INR",
@@ -70,13 +67,13 @@ describe("Phase 9 — Dashboard & Read API", () => {
         eventTimestamp: new Date("2026-08-25T10:00:00Z"),
       },
     });
+    createdPaymentIds.push(pay1.id);
 
     // Payment 2: FAILED (INSUFFICIENT_FUNDS, ₹10,000) -> Worthiness: RECOVER -> Recommended -> Attempted -> SUCCESSFUL (₹10,000)
     const pay2 = await prisma.paymentEvent.create({
       data: {
         id: `evt_dash_comp_${Date.now()}_2`,
         externalPaymentId: `ext_pay_2_${Date.now()}`,
-        companyId: testCompanyId,
         providerId: demoProviderId,
         amount: new Prisma.Decimal("10000.00"),
         currency: "INR",
@@ -88,6 +85,7 @@ describe("Phase 9 — Dashboard & Read API", () => {
         eventTimestamp: new Date("2026-08-25T11:00:00Z"),
       },
     });
+    createdPaymentIds.push(pay2.id);
 
     await prisma.paymentFailure.create({
       data: {
@@ -141,7 +139,6 @@ describe("Phase 9 — Dashboard & Read API", () => {
       data: {
         id: `evt_dash_comp_${Date.now()}_3`,
         externalPaymentId: `ext_pay_3_${Date.now()}`,
-        companyId: testCompanyId,
         providerId: demoProviderId,
         amount: new Prisma.Decimal("3000.00"),
         currency: "INR",
@@ -153,6 +150,7 @@ describe("Phase 9 — Dashboard & Read API", () => {
         eventTimestamp: new Date("2026-08-25T12:00:00Z"),
       },
     });
+    createdPaymentIds.push(pay3.id);
 
     await prisma.paymentFailure.create({
       data: {
@@ -204,7 +202,6 @@ describe("Phase 9 — Dashboard & Read API", () => {
       data: {
         id: `evt_dash_comp_${Date.now()}_4`,
         externalPaymentId: `ext_pay_4_${Date.now()}`,
-        companyId: testCompanyId,
         providerId: demoProviderId,
         amount: new Prisma.Decimal("20000.00"),
         currency: "INR",
@@ -216,6 +213,7 @@ describe("Phase 9 — Dashboard & Read API", () => {
         eventTimestamp: new Date("2026-08-25T13:00:00Z"),
       },
     });
+    createdPaymentIds.push(pay4.id);
 
     await prisma.paymentFailure.create({
       data: {
@@ -236,51 +234,9 @@ describe("Phase 9 — Dashboard & Read API", () => {
         reasoning: "Fraud / stolen card",
       },
     });
-
-    // 4. Seed 1 payment for otherCompanyId for isolation test
-    await prisma.paymentEvent.create({
-      data: {
-        id: `evt_dash_other_${Date.now()}`,
-        externalPaymentId: `ext_pay_other_${Date.now()}`,
-        companyId: otherCompanyId,
-        providerId: demoProviderId,
-        amount: new Prisma.Decimal("99999.00"),
-        currency: "INR",
-        status: PaymentStatus.COMPLETED,
-        paymentMethod: "UPI",
-        eventType: "PAYMENT_COMPLETED",
-        eventTimestamp: new Date(),
-      },
-    });
   });
 
   afterAll(async () => {
-    // Clean up created test data
-    await prisma.recoveryOutcome.deleteMany({
-      where: { recoveryAttempt: { paymentEvent: { companyId: { in: [testCompanyId, otherCompanyId, emptyCompanyId] } } } },
-    });
-    await prisma.recoveryAttempt.deleteMany({
-      where: { paymentEvent: { companyId: { in: [testCompanyId, otherCompanyId, emptyCompanyId] } } },
-    });
-    await prisma.recoveryRecommendation.deleteMany({
-      where: { paymentEvent: { companyId: { in: [testCompanyId, otherCompanyId, emptyCompanyId] } } },
-    });
-    await prisma.recoveryAssessment.deleteMany({
-      where: { paymentEvent: { companyId: { in: [testCompanyId, otherCompanyId, emptyCompanyId] } } },
-    });
-    await prisma.paymentFailure.deleteMany({
-      where: { paymentEvent: { companyId: { in: [testCompanyId, otherCompanyId, emptyCompanyId] } } },
-    });
-    await prisma.paymentEvent.deleteMany({
-      where: { companyId: { in: [testCompanyId, otherCompanyId, emptyCompanyId] } },
-    });
-    await prisma.provider.deleteMany({
-      where: { id: demoProviderId },
-    });
-    await prisma.company.deleteMany({
-      where: { id: { in: [testCompanyId, otherCompanyId, emptyCompanyId] } },
-    });
-
     await prisma.$disconnect();
   });
 
@@ -288,18 +244,13 @@ describe("Phase 9 — Dashboard & Read API", () => {
   // Summary API Tests
   // --------------------------------------------------------------------------
   describe("GET /api/dashboard/summary", () => {
-    it("returns correct aggregated summary metrics for a company", async () => {
-      const res = await request(app)
-        .get("/api/dashboard/summary")
-        .query({ companyId: testCompanyId });
+    it("returns correct aggregated summary metrics for the business", async () => {
+      const res = await request(app).get("/api/dashboard/summary");
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
 
       const { data } = res.body;
-      expect(data.company.id).toBe(testCompanyId);
-      expect(data.company.name).toBe("Dashboard Test Corp");
-      expect(data.isDemo).toBe(true);
       expect(data.currency).toBe("INR");
 
       // Verify metrics
@@ -332,38 +283,16 @@ describe("Phase 9 — Dashboard & Read API", () => {
       expect(recoveredState).toBeDefined();
       expect(recoveredState.count).toBe(1);
     });
-
-    it("returns zeroed metrics for an empty company without errors", async () => {
-      const res = await request(app)
-        .get("/api/dashboard/summary")
-        .query({ companyId: emptyCompanyId });
-
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.data.metrics.totalPayments).toBe(0);
-      expect(res.body.data.metrics.failedPayments).toBe(0);
-      expect(Number(res.body.data.metrics.actualRecoveredAmount)).toBe(0);
-      expect(res.body.data.failureBreakdown).toEqual([]);
-    });
-
-    it("returns 404 Not Found for non-existent companyId", async () => {
-      const res = await request(app)
-        .get("/api/dashboard/summary")
-        .query({ companyId: "non_existent_company_999" });
-
-      expect(res.status).toBe(404);
-      expect(res.body.success).toBe(false);
-    });
   });
 
   // --------------------------------------------------------------------------
   // Payment List API Tests
   // --------------------------------------------------------------------------
   describe("GET /api/dashboard/payments", () => {
-    it("returns paginated payment lifecycle items with default pagination", async () => {
+    it("returns paginated payment lifecycle events", async () => {
       const res = await request(app)
         .get("/api/dashboard/payments")
-        .query({ companyId: testCompanyId, page: 1, pageSize: 2 });
+        .query({ page: 1, pageSize: 2 });
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
@@ -372,32 +301,23 @@ describe("Phase 9 — Dashboard & Read API", () => {
       expect(res.body.data.pagination.pageSize).toBe(2);
       expect(res.body.data.pagination.total).toBe(4);
       expect(res.body.data.pagination.totalPages).toBe(2);
-
-      // Verify lifecycle fields on returned item
-      const item = res.body.data.items[0];
-      expect(item.id).toBeDefined();
-      expect(item.amount).toBeDefined();
-      expect(item.status).toBeDefined();
-      expect(item.isDemoSandbox).toBe(true);
     });
 
-    it("filters payments by status=FAILED", async () => {
+    it("filters payments by status=COMPLETED", async () => {
       const res = await request(app)
         .get("/api/dashboard/payments")
-        .query({ companyId: testCompanyId, status: "FAILED" });
+        .query({ status: "COMPLETED" });
 
       expect(res.status).toBe(200);
-      expect(res.body.data.items).toHaveLength(3);
-      expect(res.body.data.items.every((i: { status: string }) => i.status === "FAILED")).toBe(true);
+      expect(res.body.data.items).toHaveLength(1);
+      expect(res.body.data.items[0].status).toBe("COMPLETED");
+      expect(Number(res.body.data.items[0].amount)).toBe(5000.0);
     });
 
     it("filters payments by failureCategory=INSUFFICIENT_FUNDS", async () => {
       const res = await request(app)
         .get("/api/dashboard/payments")
-        .query({
-          companyId: testCompanyId,
-          failureCategory: "INSUFFICIENT_FUNDS",
-        });
+        .query({ failureCategory: "INSUFFICIENT_FUNDS" });
 
       expect(res.status).toBe(200);
       expect(res.body.data.items).toHaveLength(1);
@@ -407,10 +327,7 @@ describe("Phase 9 — Dashboard & Read API", () => {
     it("filters payments by recoveryWorthiness=RECOVER", async () => {
       const res = await request(app)
         .get("/api/dashboard/payments")
-        .query({
-          companyId: testCompanyId,
-          recoveryWorthiness: "RECOVER",
-        });
+        .query({ recoveryWorthiness: "RECOVER" });
 
       expect(res.status).toBe(200);
       expect(res.body.data.items).toHaveLength(1);
@@ -420,25 +337,18 @@ describe("Phase 9 — Dashboard & Read API", () => {
     it("filters payments by recoveryStatus=SUCCESSFUL", async () => {
       const res = await request(app)
         .get("/api/dashboard/payments")
-        .query({
-          companyId: testCompanyId,
-          recoveryStatus: "SUCCESSFUL",
-        });
+        .query({ recoveryStatus: "SUCCESSFUL" });
 
       expect(res.status).toBe(200);
       expect(res.body.data.items).toHaveLength(1);
       expect(res.body.data.items[0].latestAttempt.status).toBe("SUCCESSFUL");
-      expect(res.body.data.items[0].latestOutcome.actualRecoveredAmount).toBe("10000");
+      expect(Number(res.body.data.items[0].latestOutcome.actualRecoveredAmount)).toBe(10000);
     });
 
     it("sorts payments by amount in descending order", async () => {
       const res = await request(app)
         .get("/api/dashboard/payments")
-        .query({
-          companyId: testCompanyId,
-          sortBy: "amount",
-          sortOrder: "desc",
-        });
+        .query({ sortBy: "amount", sortOrder: "desc" });
 
       expect(res.status).toBe(200);
       const amounts = res.body.data.items.map((i: { amount: string }) => Number(i.amount));
@@ -448,11 +358,7 @@ describe("Phase 9 — Dashboard & Read API", () => {
     it("sorts payments by amount in ascending order", async () => {
       const res = await request(app)
         .get("/api/dashboard/payments")
-        .query({
-          companyId: testCompanyId,
-          sortBy: "amount",
-          sortOrder: "asc",
-        });
+        .query({ sortBy: "amount", sortOrder: "asc" });
 
       expect(res.status).toBe(200);
       const amounts = res.body.data.items.map((i: { amount: string }) => Number(i.amount));
@@ -462,29 +368,39 @@ describe("Phase 9 — Dashboard & Read API", () => {
     it("returns 400 Bad Request for invalid query parameters", async () => {
       const res = await request(app)
         .get("/api/dashboard/payments")
-        .query({
-          companyId: testCompanyId,
-          status: "INVALID_STATUS_NAME",
-        });
+        .query({ status: "INVALID_STATUS_NAME" });
 
       expect(res.status).toBe(400);
       expect(res.body.success).toBe(false);
       expect(res.body.error).toBe("Invalid query parameters");
     });
+  });
 
-    it("enforces strict company scoping and isolation", async () => {
-      const resOther = await request(app)
-        .get("/api/dashboard/payments")
-        .query({ companyId: otherCompanyId });
+  // --------------------------------------------------------------------------
+  // Server-Sent Events (SSE) Stream & Real-Time Updates
+  // --------------------------------------------------------------------------
+  describe("GET /api/dashboard/events (SSE Stream)", () => {
+    it("subscribes and receives real-time dashboard events globally", async () => {
+      const { dashboardEventService } = await import("../src/services/dashboard-event.service.js");
 
-      expect(resOther.status).toBe(200);
-      expect(resOther.body.data.items).toHaveLength(1);
-      expect(Number(resOther.body.data.items[0].amount)).toBe(99999.0);
+      const receivedEvents: Array<import("../src/services/dashboard-event.service.js").DashboardEventPayload> = [];
+      const unsubscribe = dashboardEventService.subscribe((evt) => {
+        receivedEvents.push(evt);
+      });
 
-      // Verify other company does not see testCompanyId's items
-      expect(
-        resOther.body.data.items.some((i: { companyId: string }) => i.companyId === testCompanyId)
-      ).toBe(false);
+      dashboardEventService.emitDashboardEvent({
+        type: "RECOVERY_CONFIRMED",
+        paymentEventId: "pay_sse_test_456",
+        recoveryAttemptId: "att_sse_test_456",
+        actualRecoveredAmount: 1250,
+        timestamp: new Date().toISOString(),
+      });
+
+      expect(receivedEvents).toHaveLength(1);
+      expect(receivedEvents[0].type).toBe("RECOVERY_CONFIRMED");
+      expect(receivedEvents[0].actualRecoveredAmount).toBe(1250);
+
+      unsubscribe();
     });
   });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import {
   type DashboardSummaryResponse,
   type DashboardPaymentsResponse,
@@ -43,6 +43,8 @@ export default function DashboardPage() {
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+
+  const isRefreshingRef = useRef(false);
 
   // Fetch summary data
   const loadSummary = useCallback(async () => {
@@ -104,9 +106,48 @@ export default function DashboardPage() {
     loadPayments();
   }, [loadPayments]);
 
+  // Safe background refresh without duplicate overlapping calls
+  const refreshDashboard = useCallback(async () => {
+    if (isRefreshingRef.current) return;
+    isRefreshingRef.current = true;
+    try {
+      await Promise.allSettled([loadSummary(), loadPayments()]);
+    } finally {
+      isRefreshingRef.current = false;
+    }
+  }, [loadSummary, loadPayments]);
+
+  // Real-time Event-Driven Dashboard Refresh via Server-Sent Events (SSE)
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof EventSource === "undefined") return;
+
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+    const eventSourceUrl = `${apiUrl}/api/dashboard/events`;
+
+    let eventSource: EventSource | null = null;
+    try {
+      eventSource = new EventSource(eventSourceUrl, { withCredentials: true });
+
+      eventSource.addEventListener("dashboard_update", () => {
+        refreshDashboard();
+      });
+
+      eventSource.onmessage = () => {
+        refreshDashboard();
+      };
+    } catch (err) {
+      console.warn("EventSource connection error:", err);
+    }
+
+    return () => {
+      if (eventSource) {
+        eventSource.close();
+      }
+    };
+  }, [refreshDashboard]);
+
   const handleRefreshAll = () => {
-    loadSummary();
-    loadPayments();
+    refreshDashboard();
   };
 
   const handleFilterChange = (newFilters: Partial<FilterState>) => {
@@ -133,7 +174,7 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-background text-foreground flex flex-col antialiased selection:bg-indigo-500 selection:text-white">
       {/* 1. Header */}
       <DashboardHeader
-        companyName={summary?.company.name}
+        companyName={summary?.company?.name || "RecoverAI"}
         isDemo={summary?.isDemo ?? true}
         onRefresh={handleRefreshAll}
         isLoading={isLoadingSummary || isLoadingPayments}

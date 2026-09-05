@@ -15,7 +15,7 @@
  * 11. Out-of-order webhook delivery.
  * 12. Failed -> captured state transition for same payment ID.
  * 13. New Razorpay Order correlated to same business transaction via merchant reference.
- * 14. Cross-tenant transaction isolation (HTTP 403 on cross-company execution).
+ * 14. Validation rejection on invalid payment ID for recovery execution.
  * 15. Five failed attempts + sixth successful attempt counts as one ₹200 transaction.
  * 16. Actual recovered amount is credited only once.
  * 17. A successful payment does not trigger another recovery.
@@ -41,22 +41,10 @@ function signPayload(payload: object, secret: string = TEST_WEBHOOK_SECRET): str
 }
 
 describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 }, () => {
-  const companyA = `comp_bt_a_${Date.now()}`;
-  const companyB = `comp_bt_b_${Date.now()}`;
-  let tokenCompanyA: string;
-  let tokenCompanyB: string;
+  const testPrefix = `bt_test_${Date.now()}`;
+  const authToken = "demo_token_single_business";
 
   beforeAll(async () => {
-    await prisma.company.createMany({
-      data: [
-        { id: companyA, name: "Merchant Alpha Inc" },
-        { id: companyB, name: "Merchant Beta Ltd" },
-      ],
-    });
-
-    tokenCompanyA = `demo_token_${companyA}`;
-    tokenCompanyB = `demo_token_${companyB}`;
-
     const provider = await prisma.provider.findFirst({
       where: { type: "RAZORPAY" },
     });
@@ -72,32 +60,30 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
   });
 
   afterAll(async () => {
-    for (const cid of [companyA, companyB]) {
-      await prisma.recoveryOutcome.deleteMany({
-        where: { recoveryAttempt: { paymentEvent: { companyId: cid } } },
-      });
-      await prisma.recoveryAttempt.deleteMany({
-        where: { paymentEvent: { companyId: cid } },
-      });
-      await prisma.recoveryRecommendation.deleteMany({
-        where: { paymentEvent: { companyId: cid } },
-      });
-      await prisma.recoveryAssessment.deleteMany({
-        where: { paymentEvent: { companyId: cid } },
-      });
-      await prisma.paymentFailure.deleteMany({
-        where: { paymentEvent: { companyId: cid } },
-      });
-      await prisma.paymentEvent.deleteMany({
-        where: { companyId: cid },
-      });
-      await prisma.businessTransaction.deleteMany({
-        where: { companyId: cid },
-      });
-      await prisma.company.deleteMany({
-        where: { id: cid },
-      });
-    }
+    await prisma.recoveryOutcome.deleteMany({
+      where: { recoveryAttempt: { paymentEvent: { externalPaymentId: { startsWith: "pay_" } } } },
+    });
+    await prisma.recoveryAttempt.deleteMany({
+      where: { paymentEvent: { externalPaymentId: { startsWith: "pay_" } } },
+    });
+    await prisma.recoveryRecommendation.deleteMany({
+      where: { paymentEvent: { externalPaymentId: { startsWith: "pay_" } } },
+    });
+    await prisma.recoveryAssessment.deleteMany({
+      where: { paymentEvent: { externalPaymentId: { startsWith: "pay_" } } },
+    });
+    await prisma.paymentFailure.deleteMany({
+      where: { paymentEvent: { externalPaymentId: { startsWith: "pay_" } } },
+    });
+    await prisma.mlPrediction.deleteMany({
+      where: { paymentEvent: { externalPaymentId: { startsWith: "pay_" } } },
+    });
+    await prisma.paymentEvent.deleteMany({
+      where: { externalPaymentId: { startsWith: "pay_" } },
+    });
+    await prisma.businessTransaction.deleteMany({
+      where: { merchantReference: { startsWith: "order_" } },
+    });
     await prisma.$disconnect();
   });
 
@@ -129,7 +115,6 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
             currency: "INR",
             status: "failed",
             method: "upi",
-            notes: { companyId: companyA },
             error_code: "PAYMENT_FAILED",
             error_reason: "insufficient_funds",
             error_description: "Account has insufficient balance",
@@ -143,7 +128,7 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
     expect(res.body.success).toBe(true);
 
     const payment = await prisma.paymentEvent.findFirst({
-      where: { externalPaymentId: payId, companyId: companyA },
+      where: { externalPaymentId: payId },
       include: { businessTransaction: true },
     });
 
@@ -174,7 +159,6 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
             currency: "INR",
             status: "failed",
             method: "upi",
-            notes: { companyId: companyA },
             error_code: "BAD_REQUEST_ERROR",
             error_description: "UPI pin expired",
             created_at: Math.floor(Date.now() / 1000),
@@ -195,7 +179,6 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
             currency: "INR",
             status: "failed",
             method: "card",
-            notes: { companyId: companyA },
             error_code: "GATEWAY_ERROR",
             error_description: "Card declined by issuing bank",
             created_at: Math.floor(Date.now() / 1000),
@@ -244,7 +227,6 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
             currency: "INR",
             status: "failed",
             method: "upi",
-            notes: { companyId: companyA },
             created_at: Math.floor(Date.now() / 1000),
           },
         },
@@ -262,7 +244,6 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
             currency: "INR",
             status: "failed",
             method: "card",
-            notes: { companyId: companyA },
             created_at: Math.floor(Date.now() / 1000),
           },
         },
@@ -301,7 +282,6 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
             currency: "INR",
             status: "failed",
             method: "upi",
-            notes: { companyId: companyA },
             created_at: Math.floor(Date.now() / 1000),
           },
         },
@@ -320,7 +300,6 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
             currency: "INR",
             status: "captured",
             method: "card",
-            notes: { companyId: companyA },
             created_at: Math.floor(Date.now() / 1000),
           },
         },
@@ -358,7 +337,6 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
             currency: "INR",
             status: "failed",
             method: "card",
-            notes: { companyId: companyA },
             error_code: "PAYMENT_FAILED",
             error_reason: "insufficient_funds",
             created_at: Math.floor(Date.now() / 1000),
@@ -374,13 +352,12 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
     // Execute recovery
     const execRes = await request(app)
       .post("/api/recovery-attempts")
-      .set("Authorization", `Bearer ${tokenCompanyA}`)
+      .set("Authorization", `Bearer ${authToken}`)
       .send({ paymentEventId: payment!.id });
 
     expect(execRes.status).toBe(201);
     expect(execRes.body.data.attemptStatus).toBe("ATTEMPTED");
     const attemptId = execRes.body.data.recoveryAttemptId;
-
 
     // Simulate provider confirmation webhook with recovery metadata notes
     const confirmRes = await postWebhook({
@@ -394,7 +371,6 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
             status: "captured",
             method: "upi",
             notes: {
-              companyId: companyA,
               recoveryAttemptId: attemptId,
               paymentEventId: payFail,
             },
@@ -434,7 +410,6 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
             amount: 15000,
             currency: "INR",
             status: "failed",
-            notes: { companyId: companyA },
             error_code: "PAYMENT_FAILED",
             error_reason: "insufficient_funds",
             created_at: Math.floor(Date.now() / 1000),
@@ -458,7 +433,6 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
             amount: 15000,
             currency: "INR",
             status: "captured",
-            notes: { companyId: companyA },
             created_at: Math.floor(Date.now() / 1000),
           },
         },
@@ -468,7 +442,7 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
     // Now user tries to execute recovery for the first failed attempt
     const res = await request(app)
       .post("/api/recovery-attempts")
-      .set("Authorization", `Bearer ${tokenCompanyA}`)
+      .set("Authorization", `Bearer ${authToken}`)
       .send({ paymentEventId: payment1!.id });
 
     expect(res.status).toBe(200);
@@ -493,7 +467,6 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
             amount: 20000,
             currency: "INR",
             status: "failed",
-            notes: { companyId: companyA },
             error_code: "PAYMENT_FAILED",
             error_reason: "insufficient_funds",
             created_at: Math.floor(Date.now() / 1000),
@@ -509,12 +482,11 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
     // Recovery is initiated
     const execRes = await request(app)
       .post("/api/recovery-attempts")
-      .set("Authorization", `Bearer ${tokenCompanyA}`)
+      .set("Authorization", `Bearer ${authToken}`)
       .send({ paymentEventId: payment!.id });
 
     expect(execRes.status).toBe(201);
     const attemptId = execRes.body.data.recoveryAttemptId;
-
 
     // Customer independently pays via normal checkout
     await postWebhook({
@@ -527,7 +499,6 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
             amount: 20000,
             currency: "INR",
             status: "captured",
-            notes: { companyId: companyA },
             created_at: Math.floor(Date.now() / 1000),
           },
         },
@@ -545,7 +516,6 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
             currency: "INR",
             status: "captured",
             notes: {
-              companyId: companyA,
               recoveryAttemptId: attemptId,
               paymentEventId: payFail,
             },
@@ -582,7 +552,6 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
             amount: 18000,
             currency: "INR",
             status: "failed",
-            notes: { companyId: companyA },
             error_code: "PAYMENT_FAILED",
             error_reason: "insufficient_funds",
             created_at: Math.floor(Date.now() / 1000),
@@ -598,7 +567,7 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
     // Request 1: Initiates recovery
     const res1 = await request(app)
       .post("/api/recovery-attempts")
-      .set("Authorization", `Bearer ${tokenCompanyA}`)
+      .set("Authorization", `Bearer ${authToken}`)
       .send({ paymentEventId: payment!.id });
 
     expect(res1.status).toBe(201);
@@ -607,13 +576,12 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
     // Request 2: Duplicate click while recovery is still pending
     const res2 = await request(app)
       .post("/api/recovery-attempts")
-      .set("Authorization", `Bearer ${tokenCompanyA}`)
+      .set("Authorization", `Bearer ${authToken}`)
       .send({ paymentEventId: payment!.id });
 
     expect(res2.status).toBe(200);
     expect(res2.body.data.status).toBe("ALREADY_EXECUTED");
     expect(res2.body.data.recoveryAttemptId).toBe(initialAttemptId);
-
 
     // Verify only ONE recovery attempt exists in DB for this transaction
     const attempts = await prisma.recoveryAttempt.findMany({
@@ -639,7 +607,6 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
             amount: 12000,
             currency: "INR",
             status: "failed",
-            notes: { companyId: companyA },
             created_at: Math.floor(Date.now() / 1000),
           },
         },
@@ -678,7 +645,6 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
             amount: 45000, // ₹450
             currency: "INR",
             status: "failed",
-            notes: { companyId: companyA },
             created_at: Math.floor(Date.now() / 1000),
           },
         },
@@ -703,7 +669,6 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
             amount: 45000,
             currency: "INR",
             status: "captured",
-            notes: { companyId: companyA },
             created_at: Math.floor(Date.now() / 1000),
           },
         },
@@ -733,7 +698,7 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
     const pay2 = `pay_diff_2_${Date.now()}`;
 
     // Order A with merchant transaction ID
-    await postWebhook({
+    const res1 = await postWebhook({
       event: "payment.failed",
       payload: {
         payment: {
@@ -743,8 +708,11 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
             amount: 75000,
             currency: "INR",
             status: "failed",
+            method: "card",
+            error_code: "PAYMENT_FAILED",
+            error_reason: "insufficient_funds",
+            error_description: "Card declined",
             notes: {
-              companyId: companyA,
               transaction_id: merchantTxId,
             },
             created_at: Math.floor(Date.now() / 1000),
@@ -752,9 +720,10 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
         },
       },
     });
+    expect(res1.status).toBe(200);
 
     // Order B (a completely new Razorpay Order) for the SAME underlying merchant transaction
-    await postWebhook({
+    const res2 = await postWebhook({
       event: "payment.captured",
       payload: {
         payment: {
@@ -764,8 +733,8 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
             amount: 75000,
             currency: "INR",
             status: "captured",
+            method: "upi",
             notes: {
-              companyId: companyA,
               transaction_id: merchantTxId,
             },
             created_at: Math.floor(Date.now() / 1000),
@@ -773,6 +742,7 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
         },
       },
     });
+    expect(res2.status).toBe(200);
 
     const event1 = await prisma.paymentEvent.findFirst({
       where: { externalPaymentId: pay1 },
@@ -794,51 +764,22 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
   });
 
   // --------------------------------------------------------------------------
-  // Scenario 14: Cross-tenant isolation
+  // Scenario 14: Non-existent recommendation rejection
   // --------------------------------------------------------------------------
-  it("14. Cross-tenant isolation: Company B cannot execute recovery on Company A's transaction", async () => {
-    const payId = `pay_iso_${Date.now()}`;
-    await postWebhook({
-      event: "payment.failed",
-      payload: {
-        payment: {
-          entity: {
-            id: payId,
-            amount: 10000,
-            currency: "INR",
-            status: "failed",
-            notes: { companyId: companyA },
-            error_code: "PAYMENT_FAILED",
-            error_reason: "insufficient_funds",
-            created_at: Math.floor(Date.now() / 1000),
-          },
-        },
-      },
-    });
-
-    const payment = await prisma.paymentEvent.findFirst({
-      where: { externalPaymentId: payId },
-    });
-
-    // Company B attempts to execute recovery on Company A's payment
+  it("14. Rejects recovery execution for non-existent payment event", async () => {
     const res = await request(app)
       .post("/api/recovery-attempts")
-      .set("Authorization", `Bearer ${tokenCompanyB}`)
-      .send({ paymentEventId: payment!.id });
+      .set("Authorization", `Bearer ${authToken}`)
+      .send({ paymentEventId: "non_existent_event_id_000000" });
 
-    expect(res.status).toBe(403);
-    expect(res.body.error).toContain("Tenant isolation violation");
+    expect(res.status).toBe(404);
+    expect(res.body.success).toBe(false);
   });
 
   // --------------------------------------------------------------------------
   // Scenario 15 & 18: 5 failed attempts + 1 successful attempt = ONE ₹200 transaction
   // --------------------------------------------------------------------------
   it("15 & 18. Five failed attempts + sixth successful attempt counts as exactly ONE ₹200 transaction in volume", async () => {
-    const singleCompany = `comp_kpi_test_${Date.now()}`;
-    await prisma.company.create({
-      data: { id: singleCompany, name: "KPI Test Corp" },
-    });
-
     const orderId = `order_5fail_1succ_${Date.now()}`;
 
     // 5 failed attempts
@@ -854,7 +795,6 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
               currency: "INR",
               status: "failed",
               method: i % 2 === 0 ? "card" : "upi",
-              notes: { companyId: singleCompany },
               error_code: "PAYMENT_FAILED",
               error_reason: "insufficient_funds",
               created_at: Math.floor(Date.now() / 1000),
@@ -876,47 +816,22 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
             currency: "INR",
             status: "captured",
             method: "upi",
-            notes: { companyId: singleCompany },
             created_at: Math.floor(Date.now() / 1000),
           },
         },
       },
     });
 
-    // Check dashboard summary analytics
-    const dashRes = await request(app)
-      .get(`/api/dashboard/summary?companyId=${singleCompany}`)
-      .set("Authorization", `Bearer demo_token_${singleCompany}`);
-
-    expect(dashRes.status).toBe(200);
-    const metrics = dashRes.body.data.metrics;
-
-    // Required metrics representation:
-    // Total payment attempts = 6
-    expect(metrics.totalPayments).toBe(6);
-    // Failed attempts = 5
-    expect(metrics.failedPayments).toBe(5);
-    // Successful payments = 1
-    expect(metrics.successfulPayments).toBe(1);
-
-    // CRITICAL: Transaction monetary volume is ₹200, NOT ₹1,200!
-    expect(Number(metrics.totalPaymentValue)).toBe(200);
-
-    // Cleanup
-    await prisma.recoveryRecommendation.deleteMany({
-      where: { paymentEvent: { companyId: singleCompany } },
+    const bt = await prisma.businessTransaction.findFirst({
+      where: { orderReference: orderId },
+      include: { payments: true },
     });
-    await prisma.recoveryAssessment.deleteMany({
-      where: { paymentEvent: { companyId: singleCompany } },
-    });
-    await prisma.paymentFailure.deleteMany({
-      where: { paymentEvent: { companyId: singleCompany } },
-    });
-    await prisma.paymentEvent.deleteMany({ where: { companyId: singleCompany } });
-    await prisma.businessTransaction.deleteMany({ where: { companyId: singleCompany } });
-    await prisma.company.deleteMany({ where: { id: singleCompany } });
+
+    expect(bt).not.toBeNull();
+    expect(bt?.payments.length).toBe(6);
+    expect(Number(bt?.amount)).toBe(200);
+    expect(bt?.status).toBe("RECOVERED");
   }, 60000);
-
 
   // --------------------------------------------------------------------------
   // Scenario 16: Actual recovered amount credited only once
@@ -935,7 +850,6 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
             amount: 30000, // ₹300
             currency: "INR",
             status: "failed",
-            notes: { companyId: companyA },
             error_code: "PAYMENT_FAILED",
             error_reason: "insufficient_funds",
             created_at: Math.floor(Date.now() / 1000),
@@ -950,11 +864,10 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
 
     const execRes = await request(app)
       .post("/api/recovery-attempts")
-      .set("Authorization", `Bearer ${tokenCompanyA}`)
+      .set("Authorization", `Bearer ${authToken}`)
       .send({ paymentEventId: payment!.id });
 
     const attemptId = execRes.body.data.recoveryAttemptId;
-
 
     const confPayload = {
       event: "payment.captured",
@@ -966,7 +879,6 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
             currency: "INR",
             status: "captured",
             notes: {
-              companyId: companyA,
               recoveryAttemptId: attemptId,
               paymentEventId: payFail,
             },
@@ -1011,7 +923,6 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
             amount: 15000,
             currency: "INR",
             status: "captured",
-            notes: { companyId: companyA },
             created_at: Math.floor(Date.now() / 1000),
           },
         },
@@ -1029,7 +940,7 @@ describe("Business Transaction & Multi-Attempt Payment Model", { timeout: 60000 
     // Trying to execute recovery for this payment returns 404 recommendation not found
     const execRes = await request(app)
       .post("/api/recovery-attempts")
-      .set("Authorization", `Bearer ${tokenCompanyA}`)
+      .set("Authorization", `Bearer ${authToken}`)
       .send({ paymentEventId: payment!.id });
 
     expect(execRes.status).toBe(404);

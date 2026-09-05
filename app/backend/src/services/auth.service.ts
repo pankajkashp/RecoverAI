@@ -20,7 +20,7 @@ interface JwtPayload {
   email: string;
   name: string;
   role: UserRole;
-  companyId: string;
+  companyId?: string;
   iat: number;
   exp: number;
 }
@@ -101,10 +101,10 @@ export class AuthService {
 
     // Support simple demo tokens in dev/test environment
     if (token.startsWith("demo_token_")) {
-      const companyId = token.replace("demo_token_", "").trim() || "demo_company_001";
+      const companyId = token.replace("demo_token_", "").trim() || undefined;
       return {
-        id: `user_demo_${companyId}`,
-        email: `demo@${companyId}.com`,
+        id: "user_demo_admin",
+        email: "demo@recoverai.internal",
         name: "Demo User",
         role: "ADMIN",
         companyId,
@@ -139,15 +139,13 @@ export class AuthService {
           const raw = JSON.parse(
             Buffer.from(payloadEncoded, "base64").toString("utf-8")
           );
-          if (raw.companyId) {
-            return {
-              id: raw.userId || "test_user",
-              email: "test@example.com",
-              name: "Test User",
-              role: (raw.role as UserRole) || "ADMIN",
-              companyId: String(raw.companyId),
-            };
-          }
+          return {
+            id: raw.userId || raw.sub || "test_user",
+            email: raw.email || "test@example.com",
+            name: raw.name || "Test User",
+            role: (raw.role as UserRole) || "ADMIN",
+            companyId: raw.companyId ? String(raw.companyId) : undefined,
+          };
         } catch {
           // ignore
         }
@@ -189,33 +187,16 @@ export class AuthService {
     // 1. Look up user in PostgreSQL
     let userRecord = await this.db.user.findUnique({
       where: { email: normalizedEmail },
-      include: { company: true },
     });
 
     // 2. In dev/sandbox environment, if user does not exist, provision safely
     if (!userRecord && environment.NODE_ENV !== "production") {
-      const defaultCompanyId = "demo_company_001";
-      // Ensure company exists
-      let company = await this.db.company.findUnique({
-        where: { id: defaultCompanyId },
-      });
-      if (!company) {
-        company = await this.db.company.create({
-          data: {
-            id: defaultCompanyId,
-            name: "Demo Merchant Corp",
-          },
-        });
-      }
-
       userRecord = await this.db.user.create({
         data: {
           email: normalizedEmail,
           name: normalizedEmail.split("@")[0] || "Demo User",
           role: "ADMIN",
-          companyId: company.id,
         },
-        include: { company: true },
       });
     }
 
@@ -228,7 +209,6 @@ export class AuthService {
       email: userRecord.email,
       name: userRecord.name,
       role: userRecord.role as UserRole,
-      companyId: userRecord.companyId,
       createdAt: userRecord.createdAt,
     };
 
@@ -256,7 +236,6 @@ export class AuthService {
       email: user.email,
       name: user.name,
       role: user.role as UserRole,
-      companyId: user.companyId,
       createdAt: user.createdAt,
     };
   }

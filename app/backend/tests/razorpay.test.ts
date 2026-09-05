@@ -22,6 +22,7 @@ import {
 } from "@recoverai/integrations";
 import { createApp } from "../src/app.js";
 import { environment } from "../src/config/env.js";
+import { FailureAnalysisService } from "../src/services/failure-analysis.service.js";
 
 const prisma = new PrismaClient();
 const app = createApp();
@@ -35,54 +36,26 @@ function signPayload(payload: object, secret: string = TEST_WEBHOOK_SECRET): str
 }
 
 describe("Phase 11 — Razorpay Sandbox Integration", () => {
-  const testCompanyId = `company_rzp_${Date.now()}`;
   let razorpayProviderId: string;
 
   beforeAll(async () => {
-    // 1. Seed Company
-    await prisma.company.create({
-      data: {
-        id: testCompanyId,
-        name: "Razorpay Test Merchant Corp",
-      },
+    // Seed Provider if not exists
+    let provider = await prisma.provider.findFirst({
+      where: { type: "RAZORPAY" },
     });
-
-    // 2. Seed Provider
-    const provider = await prisma.provider.create({
-      data: {
-        id: `prov_rzp_${Date.now()}`,
-        name: "Razorpay Test Provider",
-        type: "RAZORPAY",
-      },
-    });
+    if (!provider) {
+      provider = await prisma.provider.create({
+        data: {
+          id: `prov_rzp_${Date.now()}`,
+          name: "Razorpay Test Provider",
+          type: "RAZORPAY",
+        },
+      });
+    }
     razorpayProviderId = provider.id;
   });
 
   afterAll(async () => {
-    await prisma.recoveryOutcome.deleteMany({
-      where: { recoveryAttempt: { paymentEvent: { companyId: testCompanyId } } },
-    });
-    await prisma.recoveryAttempt.deleteMany({
-      where: { paymentEvent: { companyId: testCompanyId } },
-    });
-    await prisma.recoveryRecommendation.deleteMany({
-      where: { paymentEvent: { companyId: testCompanyId } },
-    });
-    await prisma.recoveryAssessment.deleteMany({
-      where: { paymentEvent: { companyId: testCompanyId } },
-    });
-    await prisma.paymentFailure.deleteMany({
-      where: { paymentEvent: { companyId: testCompanyId } },
-    });
-    await prisma.paymentEvent.deleteMany({
-      where: { companyId: testCompanyId },
-    });
-    await prisma.provider.deleteMany({
-      where: { id: razorpayProviderId },
-    });
-    await prisma.company.deleteMany({
-      where: { id: testCompanyId },
-    });
     await prisma.$disconnect();
   });
 
@@ -132,7 +105,6 @@ describe("Phase 11 — Razorpay Sandbox Integration", () => {
               email: "john.doe@example.com",
               contact: "+919876543210",
               notes: {
-                company_id: testCompanyId,
                 customer_id: "cust_rzp_99",
               },
               error_code: "BAD_REQUEST_ERROR",
@@ -150,7 +122,6 @@ describe("Phase 11 — Razorpay Sandbox Integration", () => {
       const canonical = adapter.normalize(webhookPayload);
 
       expect(canonical.externalPaymentId).toBe("pay_rzp_fail_001");
-      expect(canonical.companyId).toBe(testCompanyId);
       expect(canonical.amount).toBe(2500.0); // Converted from paise
       expect(canonical.currency).toBe("INR");
       expect(canonical.status).toBe("FAILED");
@@ -184,7 +155,7 @@ describe("Phase 11 — Razorpay Sandbox Integration", () => {
               status: "captured",
               method: "upi",
               vpa: "customer@okhdfc",
-              notes: { companyId: testCompanyId },
+              notes: {},
               created_at: 1724600100,
               acquirer_data: {},
             },
@@ -246,7 +217,7 @@ describe("Phase 11 — Razorpay Sandbox Integration", () => {
               currency: "INR",
               status: "captured",
               method: "upi",
-              notes: { company_id: testCompanyId },
+              notes: {},
               created_at: Math.floor(Date.now() / 1000),
               acquirer_data: {},
             },
@@ -291,7 +262,6 @@ describe("Phase 11 — Razorpay Sandbox Integration", () => {
               type: "debit",
             },
             notes: {
-              company_id: testCompanyId,
               customer_id: "cust_rzp_pipe_1",
             },
             error_code: "BAD_REQUEST_ERROR",
@@ -321,7 +291,7 @@ describe("Phase 11 — Razorpay Sandbox Integration", () => {
 
       // Verify records in PostgreSQL
       const payment = await prisma.paymentEvent.findFirst({
-        where: { externalPaymentId: extPaymentId, companyId: testCompanyId },
+        where: { externalPaymentId: extPaymentId },
         include: {
           failure: true,
           assessment: true,
@@ -361,7 +331,7 @@ describe("Phase 11 — Razorpay Sandbox Integration", () => {
 
       // Verify that NO duplicate records were created in the database
       const count = await prisma.paymentEvent.count({
-        where: { externalPaymentId: extPaymentId, companyId: testCompanyId },
+        where: { externalPaymentId: extPaymentId },
       });
       expect(count).toBe(1);
 
@@ -386,7 +356,7 @@ describe("Phase 11 — Razorpay Sandbox Integration", () => {
         status: "failed",
         method: "card",
         created_at: Math.floor(Date.now() / 1000),
-        notes: { company_id: testCompanyId },
+        notes: {},
         error_reason: "insufficient_funds",
       });
 
@@ -456,9 +426,7 @@ describe("Phase 11 — Razorpay Sandbox Integration", () => {
         },
       };
 
-      const canonical = testAdapter.normalize(payloadWithEmptyArrays, {
-        companyId: testCompanyId,
-      });
+      const canonical = testAdapter.normalize(payloadWithEmptyArrays);
 
       expect(canonical.externalPaymentId).toBe("pay_rzp_empty_arr_001");
       expect(canonical.amount).toBe(500.0);
@@ -501,9 +469,7 @@ describe("Phase 11 — Razorpay Sandbox Integration", () => {
         },
       };
 
-      const canonical = testAdapter.normalize(orderPaidPayload, {
-        companyId: testCompanyId,
-      });
+      const canonical = testAdapter.normalize(orderPaidPayload);
 
       expect(canonical.externalPaymentId).toBe("pay_rzp_order_paid_101");
       expect(canonical.amount).toBe(750.0);
@@ -562,7 +528,7 @@ describe("Phase 11 — Razorpay Sandbox Integration", () => {
         .digest("hex");
 
       const res = await request(app)
-        .post(`/api/webhooks/razorpay?companyId=${testCompanyId}`)
+        .post("/api/webhooks/razorpay")
         .set("Content-Type", "application/json")
         .set("X-Razorpay-Signature", signature)
         .send(rawBody);
@@ -635,7 +601,7 @@ describe("Phase 11 — Razorpay Sandbox Integration", () => {
         .digest("hex");
 
       const res = await request(app)
-        .post(`/api/webhooks/razorpay?companyId=${testCompanyId}`)
+        .post("/api/webhooks/razorpay")
         .set("Content-Type", "application/json")
         .set("X-Razorpay-Signature", signature)
         .send(rawBody);
@@ -646,7 +612,7 @@ describe("Phase 11 — Razorpay Sandbox Integration", () => {
 
       // Verify failure classification in database
       const dbPayment = await prisma.paymentEvent.findFirst({
-        where: { externalPaymentId: paymentId, companyId: testCompanyId },
+        where: { externalPaymentId: paymentId },
         include: { failure: true, assessment: true, recommendation: true },
       });
 
@@ -690,7 +656,7 @@ describe("Phase 11 — Razorpay Sandbox Integration", () => {
         .digest("hex");
 
       const res = await request(app)
-        .post(`/api/webhooks/razorpay?companyId=${testCompanyId}`)
+        .post("/api/webhooks/razorpay")
         .set("Content-Type", "application/json")
         .set("X-Razorpay-Signature", signature)
         .send(rawBody);
@@ -736,7 +702,7 @@ describe("Phase 11 — Razorpay Sandbox Integration", () => {
         .digest("hex");
 
       const res = await request(app)
-        .post(`/api/webhooks/razorpay?companyId=${testCompanyId}`)
+        .post("/api/webhooks/razorpay")
         .set("Content-Type", "application/json")
         .set("X-Razorpay-Signature", signature)
         .send(rawBody);
@@ -784,7 +750,7 @@ describe("Phase 11 — Razorpay Sandbox Integration", () => {
         .digest("hex");
 
       const res = await request(app)
-        .post(`/api/webhooks/razorpay?companyId=${testCompanyId}`)
+        .post("/api/webhooks/razorpay")
         .set("Content-Type", "application/json")
         .set("X-Razorpay-Signature", signature)
         .send(rawBody);
@@ -797,6 +763,117 @@ describe("Phase 11 — Razorpay Sandbox Integration", () => {
       });
 
       expect(dbPayment?.failure?.category).toBe("CUSTOMER_ACTION_REQUIRED");
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // 5. Hardened Evidence-Based Classification (adapter -> FailureAnalysisService)
+  // --------------------------------------------------------------------------
+  describe("Hardened Razorpay Failure Evidence -> Classification", () => {
+    const evidenceAdapter = new RazorpayProviderAdapter();
+    const evidenceFailureService = new FailureAnalysisService();
+
+    function normalizeAndAnalyze(errorFields: {
+      error_code?: string;
+      error_description?: string;
+      error_source?: string;
+      error_step?: string;
+      error_reason?: string;
+      acquirer_data?: Record<string, unknown>;
+      method?: string;
+    }) {
+      const canonical = evidenceAdapter.normalize({
+        id: `pay_rzp_evidence_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        entity: "payment",
+        amount: 10000,
+        currency: "INR",
+        status: "failed",
+        method: errorFields.method || "card",
+        created_at: Math.floor(Date.now() / 1000),
+        notes: {},
+        ...errorFields,
+      });
+      return { canonical, analysis: evidenceFailureService.analyzeFailure(canonical) };
+    }
+
+    it("uses acquirer response_code 54 (expired card) as PERMANENT evidence, not just the code string", () => {
+      const { canonical, analysis } = normalizeAndAnalyze({
+        error_code: "BAD_REQUEST_ERROR",
+        error_description: "Transaction declined",
+        error_source: "bank",
+        acquirer_data: { response_code: "54" },
+      });
+
+      expect(canonical.failureCategory).toBe("CARD");
+      expect(analysis.category).toBe("CARD");
+      expect(analysis.classification).toBe("PERMANENT");
+      expect(analysis.isTemporary).toBe(false);
+    });
+
+    it("uses error_source=bank + error_reason (account permanently blocked) as PERMANENT BANK evidence", () => {
+      const { canonical, analysis } = normalizeAndAnalyze({
+        error_code: "BAD_REQUEST_ERROR",
+        error_description: "The account is permanently blocked",
+        error_source: "bank",
+        error_reason: "account_blocked",
+        method: "netbanking",
+      });
+
+      expect(canonical.failureCategory).toBe("BANK");
+      expect(analysis.category).toBe("BANK");
+      expect(analysis.classification).toBe("PERMANENT");
+      expect(analysis.isTemporary).toBe(false);
+    });
+
+    it("uses error_step=payment_authentication + description to classify CUSTOMER_ACTION style OTP evidence", () => {
+      const { canonical, analysis } = normalizeAndAnalyze({
+        error_code: "BAD_REQUEST_ERROR",
+        error_description: "OTP authentication is required to complete this payment",
+        error_source: "customer",
+        error_step: "payment_authentication",
+        method: "upi",
+      });
+
+      expect(canonical.failureCategory).toBe("AUTHENTICATION");
+      expect(analysis.category).toBe("AUTHENTICATION");
+      // Pending customer action, not a permanent failure.
+      expect(analysis.classification).toBe("TEMPORARY");
+      expect(analysis.isTemporary).toBe(true);
+    });
+
+    it("does not misclassify a vague 'unknown provider error' message as PROVIDER via source/text guessing", () => {
+      const { canonical, analysis } = normalizeAndAnalyze({
+        error_code: "UNKNOWN_ERROR",
+        error_description: "Unknown provider error",
+      });
+
+      expect(canonical.failureCategory).toBe("UNKNOWN");
+      expect(analysis.category).toBe("UNKNOWN");
+      expect(analysis.classification).toBe("UNKNOWN");
+      expect(analysis.isTemporary).toBeNull();
+    });
+
+    it("preserves acquirer/source/step evidence in metadata for downstream explainability", () => {
+      const { canonical } = normalizeAndAnalyze({
+        error_code: "BAD_REQUEST_ERROR",
+        error_description: "Card issuer declined payment due to insufficient balance",
+        error_source: "bank",
+        error_step: "payment_authorization",
+        error_reason: "insufficient_funds",
+        acquirer_data: { response_code: "51" },
+      });
+
+      expect(canonical.metadata?.razorpayError).toEqual(
+        expect.objectContaining({
+          code: "BAD_REQUEST_ERROR",
+          source: "bank",
+          step: "payment_authorization",
+          reason: "insufficient_funds",
+        })
+      );
+      expect(canonical.metadata?.acquirerData).toEqual(
+        expect.objectContaining({ response_code: "51" })
+      );
     });
   });
 });

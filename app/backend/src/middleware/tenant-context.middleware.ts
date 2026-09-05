@@ -1,10 +1,7 @@
 /**
- * RecoverAI — Tenant Context & Authorization Middleware
+ * RecoverAI — Authentication & Context Middleware
  *
- * Phase 10: Production Readiness, Security & Reliability
- *
- * Enforces multi-tenant data isolation and resolves authenticated tenant scope.
- * Guarantees that Tenant A cannot access, query, or mutate Tenant B records.
+ * Resolves authenticated user profile and roles for API security.
  */
 
 import { type Request, type Response, type NextFunction } from "express";
@@ -14,7 +11,7 @@ import { AuthService } from "../services/auth.service.js";
 import { AuditService } from "../services/audit.service.js";
 
 export interface TenantContext {
-  companyId: string;
+  companyId?: string;
   userId?: string;
   role?: UserRole;
   isDemoSandbox: boolean;
@@ -33,7 +30,7 @@ declare global {
 }
 
 export class TenantIsolationError extends Error {
-  constructor(message: string = "Cross-tenant access is strictly prohibited") {
+  constructor(message: string = "Unauthorized access") {
     super(message);
     this.name = "TenantIsolationError";
   }
@@ -76,42 +73,10 @@ export function tenantContextMiddleware(
     }
   }
 
-  // 5. Identify target company from query or body
-  const targetCompanyId =
-    (typeof req.query.companyId === "string" && req.query.companyId.trim()) ||
-    (typeof req.body?.companyId === "string" && req.body.companyId.trim()) ||
-    null;
-
-  // 6. Authenticated User Flow & Multi-Tenant Isolation
+  // 5. Authenticated User Flow
   if (authUser) {
     req.user = authUser;
-
-    // Strict Multi-Tenant Isolation Check: Reject cross-tenant spoofing attempts
-    if (targetCompanyId && targetCompanyId !== authUser.companyId) {
-      auditService.log({
-        userId: authUser.id,
-        companyId: authUser.companyId,
-        role: authUser.role,
-        action: "TENANT_ISOLATION_VIOLATION_ATTEMPT",
-        resource: req.originalUrl || req.path,
-        status: "DENIED",
-        requestId: req.id,
-        metadata: {
-          targetCompanyId,
-          authenticatedCompanyId: authUser.companyId,
-        },
-      });
-
-      res.status(403).json({
-        success: false,
-        error: "Tenant isolation violation: cannot access another company's data",
-        requestId: req.id,
-      });
-      return;
-    }
-
     req.tenant = {
-      companyId: authUser.companyId,
       userId: authUser.id,
       role: authUser.role,
       isDemoSandbox: false,
@@ -121,10 +86,10 @@ export function tenantContextMiddleware(
     return;
   }
 
-  // 7. Production requirement vs Sandbox/Dev fallback
+  // 6. Production requirement vs Sandbox/Dev fallback
   if (environment.NODE_ENV === "production") {
-    // In production, unauthenticated requests to protected APIs are rejected
-    if (req.path.startsWith("/api/")) {
+    // In production, unauthenticated requests to protected mutating APIs are rejected
+    if (req.path.startsWith("/api/recovery-attempts")) {
       auditService.log({
         action: "UNAUTHENTICATED_ACCESS_BLOCKED",
         resource: req.originalUrl || req.path,
@@ -141,9 +106,8 @@ export function tenantContextMiddleware(
     }
   }
 
-  // 8. Development / Sandbox fallback context
+  // 7. Development / Sandbox fallback context
   req.tenant = {
-    companyId: targetCompanyId || "demo_company_001",
     role: "ADMIN",
     isDemoSandbox: true,
     isAuthenticated: false,
@@ -151,3 +115,4 @@ export function tenantContextMiddleware(
 
   next();
 }
+

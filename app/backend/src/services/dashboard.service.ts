@@ -30,39 +30,9 @@ export class DashboardService {
   constructor(private readonly prisma: PrismaClient = defaultPrisma) {}
 
   /**
-   * Resolves the company context.
-   * If companyId is provided, validates that company exists.
-   * If not provided in sandbox/demo environment, defaults to the primary demo company.
+   * Retrieves canonical aggregate summary metrics for the single-business dashboard.
    */
-  private async resolveCompany(companyId?: string) {
-    if (companyId) {
-      const company = await this.prisma.company.findUnique({
-        where: { id: companyId },
-      });
-      if (!company) {
-        throw new Error(`Company not found with ID: ${companyId}`);
-      }
-      return company;
-    }
-
-    // Default to the first available company or demo company
-    const defaultCompany = await this.prisma.company.findFirst({
-      orderBy: { createdAt: "asc" },
-    });
-
-    if (!defaultCompany) {
-      throw new Error("No company found in database");
-    }
-
-    return defaultCompany;
-  }
-
-  /**
-   * Retrieves canonical aggregate summary metrics for the company dashboard.
-   */
-  async getDashboardSummary(companyId?: string): Promise<DashboardSummaryResponse> {
-    const company = await this.resolveCompany(companyId);
-
+  async getDashboardSummary(_companyId?: string): Promise<DashboardSummaryResponse> {
     // 1. Fetch summary metrics concurrently in a single Promise.all
     const [
       totalPayments,
@@ -83,26 +53,22 @@ export class DashboardService {
       btPotRecoverableSum,
     ] = await Promise.all([
       // 1. Total payments count (attempts)
-      this.prisma.paymentEvent.count({
-        where: { companyId: company.id },
-      }),
+      this.prisma.paymentEvent.count(),
       // 2. Failed payments count (attempts)
       this.prisma.paymentEvent.count({
-        where: { companyId: company.id, status: "FAILED" },
+        where: { status: "FAILED" },
       }),
       // 3. Completed payments count (attempts)
       this.prisma.paymentEvent.count({
-        where: { companyId: company.id, status: "COMPLETED" },
+        where: { status: "COMPLETED" },
       }),
       // 4. Total payments monetary sum (legacy fallback)
       this.prisma.paymentEvent.aggregate({
-        where: { companyId: company.id },
         _sum: { amount: true },
       }),
       // 5. Potentially recoverable sum (legacy fallback)
       this.prisma.paymentEvent.aggregate({
         where: {
-          companyId: company.id,
           status: "FAILED",
           assessment: { worthiness: "RECOVER" },
         },
@@ -110,72 +76,53 @@ export class DashboardService {
       }),
       // 6. Estimated recoverable sum
       this.prisma.recoveryAssessment.aggregate({
-        where: {
-          paymentEvent: { companyId: company.id },
-        },
         _sum: { estimatedRecoverableAmount: true },
       }),
       // 7. Actual recovered sum
       this.prisma.recoveryOutcome.aggregate({
-        where: {
-          recoveryAttempt: { paymentEvent: { companyId: company.id } },
-        },
         _sum: { actualRecoveredAmount: true },
       }),
       // 8. Recommended actions count
-      this.prisma.recoveryRecommendation.count({
-        where: { paymentEvent: { companyId: company.id } },
-      }),
+      this.prisma.recoveryRecommendation.count(),
       // 9. Recovery attempts count
-      this.prisma.recoveryAttempt.count({
-        where: { paymentEvent: { companyId: company.id } },
-      }),
+      this.prisma.recoveryAttempt.count(),
       // 10. Successful recoveries count
       this.prisma.recoveryOutcome.count({
         where: {
-          recoveryAttempt: { paymentEvent: { companyId: company.id } },
           outcome: "SUCCESSFUL",
         },
       }),
       // 11. Failure breakdown by category
       this.prisma.paymentFailure.groupBy({
         by: ["category"],
-        where: {
-          paymentEvent: { companyId: company.id },
-        },
         _count: { category: true },
       }),
       // 12. Do not recover assessments count
       this.prisma.recoveryAssessment.count({
         where: {
-          paymentEvent: { companyId: company.id },
           worthiness: "DO_NOT_RECOVER",
         },
       }),
       // 13. Review required assessments count
       this.prisma.recoveryAssessment.count({
         where: {
-          paymentEvent: { companyId: company.id },
           worthiness: "REVIEW",
         },
       }),
       // 14. Failed recovery outcomes count
       this.prisma.recoveryOutcome.count({
         where: {
-          recoveryAttempt: { paymentEvent: { companyId: company.id } },
           outcome: "FAILED",
         },
       }),
       // 15. Total BusinessTransactions count and monetary sum (prevents multiplying volume by attempts)
       this.prisma.businessTransaction.aggregate({
-        where: { companyId: company.id },
         _sum: { amount: true },
         _count: { id: true },
       }),
       // 16. Potentially recoverable sum from business transactions that required recovery
       this.prisma.businessTransaction.aggregate({
         where: {
-          companyId: company.id,
           status: { in: ["FAILED", "RECOVERED"] },
         },
         _sum: { amount: true },
@@ -264,9 +211,13 @@ export class DashboardService {
         : 0;
 
     return {
+      business: {
+        id: "recoverai",
+        name: "RecoverAI",
+      },
       company: {
-        id: company.id,
-        name: company.name,
+        id: "recoverai",
+        name: "RecoverAI",
       },
       currency: "INR",
       isDemo: true,
@@ -300,18 +251,14 @@ export class DashboardService {
   async getDashboardPayments(
     query: DashboardPaymentsQuery
   ): Promise<DashboardPaymentsResponse> {
-    const company = await this.resolveCompany(query.companyId);
-
     const pageNum = query.page !== undefined ? Number(query.page) : 1;
     const pageSizeNum = query.pageSize !== undefined ? Number(query.pageSize) : 10;
     const page = Math.max(1, Number.isFinite(pageNum) ? pageNum : 1);
     const pageSize = Math.min(100, Math.max(1, Number.isFinite(pageSizeNum) ? pageSizeNum : 10));
     const skip = (page - 1) * pageSize;
 
-    // Construct Prisma WHERE clause with strict company scoping
-    const where: Prisma.PaymentEventWhereInput = {
-      companyId: company.id,
-    };
+    // Construct Prisma WHERE clause for single business dataset
+    const where: Prisma.PaymentEventWhereInput = {};
 
     if (query.status) {
       where.status = query.status as PaymentStatus;
@@ -373,7 +320,6 @@ export class DashboardService {
         select: {
           id: true,
           externalPaymentId: true,
-          companyId: true,
           providerId: true,
           businessTransactionId: true,
           orderReference: true,
@@ -448,7 +394,6 @@ export class DashboardService {
       return {
         id: record.id,
         externalPaymentId: record.externalPaymentId,
-        companyId: record.companyId,
         providerId: record.providerId,
         providerType: record.provider.type,
         businessTransactionId: record.businessTransactionId,

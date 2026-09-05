@@ -121,33 +121,15 @@ enum RecoveryAttribution {
 // Models
 // ---------------------------------------------------------------------------
 
-/// A business using RecoverAI.
-model Company {
-  id        String   @id @default(cuid())
-  name      String
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  users                User[]
-  payments             PaymentEvent[]
-  businessTransactions BusinessTransaction[]
-
-  @@map("companies")
-}
-
-/// An authorized dashboard user belonging to a company.
+/// An authorized dashboard user.
 model User {
   id        String   @id @default(cuid())
-  companyId String   @map("company_id")
   name      String
   email     String   @unique
   role      UserRole @default(MEMBER)
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
-
-  @@index([companyId])
   @@map("users")
 }
 
@@ -170,7 +152,6 @@ model Provider {
 /// A business transaction grouping one or more payment attempts across provider orders.
 model BusinessTransaction {
   id                  String                    @id @default(cuid())
-  companyId           String                    @map("company_id")
   merchantReference   String?                   @map("merchant_reference")
   orderReference      String?                   @map("order_reference")
   amount              Decimal                   @db.Decimal(12, 2)
@@ -182,15 +163,11 @@ model BusinessTransaction {
   createdAt           DateTime                  @default(now()) @map("created_at")
   updatedAt           DateTime                  @updatedAt @map("updated_at")
 
-  company  Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
   payments PaymentEvent[]
 
-
-  @@unique([companyId, merchantReference], name: "company_merchant_ref_unique")
-  @@index([companyId])
-  @@index([companyId, orderReference])
-  @@index([companyId, status])
+  @@unique([merchantReference], name: "merchant_ref_unique")
   @@index([orderReference])
+  @@index([status])
   @@map("business_transactions")
 }
 
@@ -199,7 +176,6 @@ model BusinessTransaction {
 model PaymentEvent {
   id                    String        @id @default(cuid())
   externalPaymentId     String        @map("external_payment_id")
-  companyId             String        @map("company_id")
   providerId            String        @map("provider_id")
   businessTransactionId String?       @map("business_transaction_id")
   orderReference        String?       @map("order_reference")
@@ -216,7 +192,6 @@ model PaymentEvent {
   createdAt             DateTime      @default(now()) @map("created_at")
   updatedAt             DateTime      @updatedAt @map("updated_at")
 
-  company             Company                 @relation(fields: [companyId], references: [id], onDelete: Restrict)
   provider            Provider                @relation(fields: [providerId], references: [id], onDelete: Restrict)
   businessTransaction BusinessTransaction?    @relation(fields: [businessTransactionId], references: [id], onDelete: SetNull)
 
@@ -227,11 +202,8 @@ model PaymentEvent {
   predictions         MlPrediction[]
 
   // Idempotency: prevent duplicate business records from the same provider event
-  @@unique([providerId, externalPaymentId, companyId], name: "provider_external_company_unique")
-  @@index([companyId])
+  @@unique([providerId, externalPaymentId], name: "provider_external_unique")
   @@index([status])
-  @@index([companyId, status])
-  @@index([companyId, eventTimestamp])
   @@index([providerId])
   @@index([externalPaymentId])
   @@index([eventTimestamp])
