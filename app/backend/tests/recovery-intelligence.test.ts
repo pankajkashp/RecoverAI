@@ -103,7 +103,7 @@ describe("Phase 5 — Recovery Intelligence Service", () => {
       expect(assessment.reasoning).toContain("permanently declined");
     });
 
-    it("evaluates UNKNOWN failure as REVIEW with 0 estimated amount (conservative)", () => {
+    it("evaluates UNKNOWN failure as REVIEW with the full amount at stake (consistent with other REVIEW categories)", () => {
       const failure = failureService.analyzeFailure({
         ...baseEvent,
         failureCode: "STRANGE_ERR_9999",
@@ -111,7 +111,8 @@ describe("Phase 5 — Recovery Intelligence Service", () => {
       const assessment = recoveryService.assessRecovery(baseEvent, failure);
 
       expect(assessment.worthiness).toBe("REVIEW");
-      expect(assessment.estimatedRecoverableAmount).toBe(0);
+      expect(assessment.estimatedRecoverableAmount).toBe(10000.0);
+      expect(assessment.confidence).toBeLessThanOrEqual(0.3);
       expect(assessment.reasoning).toContain("unclassified or unrecognized");
     });
   });

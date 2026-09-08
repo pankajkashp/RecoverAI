@@ -162,8 +162,13 @@ export class RecoveryIntelligenceService {
 
       case "UNKNOWN":
       default:
+        // Consistent with every other REVIEW-worthiness category: the original
+        // amount is still at stake pending manual review, so it counts toward
+        // the financial forecast. Confidence stays low and no auto-retry
+        // happens regardless — this only affects visibility into the pool of
+        // money awaiting review, not the safety of the recommended action.
         worthiness = "REVIEW";
-        estimatedRecoverableAmount = 0;
+        estimatedRecoverableAmount = originalAmount;
         confidence = 0.3;
         reasoning =
           "The payment failure reason is unclassified or unrecognized. Automated recovery is deferred pending operational review.";
