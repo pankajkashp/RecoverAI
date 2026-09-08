@@ -419,12 +419,16 @@ export class FailureAnalysisService {
       return "CUSTOMER_ACTION_REQUIRED";
     }
 
-    // 8. PROVIDER — requires specific gateway/processor evidence, not a bare
-    // "provider"/"error" combination (too generic; would misfire on ambiguous
-    // messages such as "unknown provider error").
+    // 8. PROVIDER — requires specific gateway/processor evidence, never a bare
+    // error.source of "gateway" or "business" alone. Razorpay's test-mode
+    // sandbox reports source: "gateway" with a wholly generic { code:
+    // BAD_REQUEST_ERROR, reason: payment_failed } payload even for genuine
+    // card/issuer declines. Trusting source alone would auto-recommend
+    // RETRY_PAYMENT on what may be a permanent decline — exactly the blind
+    // retry this system exists to prevent. Absent specific outage/processor
+    // evidence, this falls through to UNKNOWN so ML scoring and manual review
+    // are engaged instead of a confident guess.
     if (
-      evidence.source === "gateway" ||
-      evidence.source === "business" ||
       hasAnyPhrase(text, [
         "gateway error",
         "processor error",

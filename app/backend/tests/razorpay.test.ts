@@ -536,7 +536,7 @@ describe("Phase 11 — Razorpay Sandbox Integration", () => {
       expect(res.body.status).toBe("FAILED");
     });
 
-    it("correctly classifies the actual Razorpay test failure (card authorization gateway failure: BAD_REQUEST_ERROR / payment_failed / gateway) as PROVIDER and not UNKNOWN", async () => {
+    it("correctly classifies the actual Razorpay test failure (generic BAD_REQUEST_ERROR / payment_failed / gateway with no specific evidence) as UNKNOWN, deferring to review instead of assuming a safe retry", async () => {
       const paymentId = `pay_rzp_real_232_${Date.now()}`;
       const payload = {
         entity: "event",
@@ -614,11 +614,13 @@ describe("Phase 11 — Razorpay Sandbox Integration", () => {
       });
 
       expect(dbPayment).toBeDefined();
-      expect(dbPayment?.failure?.category).toBe("PROVIDER");
-      expect(dbPayment?.failure?.category).not.toBe("UNKNOWN");
-      expect(dbPayment?.assessment?.worthiness).toBe("RECOVER");
-      expect(Number(dbPayment?.assessment?.estimatedRecoverableAmount)).toBe(232.0);
-      expect(dbPayment?.recommendation?.action).toBe("RETRY_PAYMENT");
+      // A bare error.source of "gateway" with no other specific evidence (Razorpay's
+      // sandbox reports this exact generic payload for real card/issuer declines too)
+      // must not be confidently guessed as PROVIDER — that would auto-recommend a
+      // retry on what may be a permanent decline. It defers to UNKNOWN instead.
+      expect(dbPayment?.failure?.category).toBe("UNKNOWN");
+      expect(dbPayment?.assessment?.worthiness).toBe("REVIEW");
+      expect(dbPayment?.recommendation?.action).toBe("REVIEW");
     });
 
     it("correctly classifies UPI MPIN failure as AUTHENTICATION", async () => {

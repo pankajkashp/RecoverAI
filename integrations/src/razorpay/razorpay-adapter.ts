@@ -506,13 +506,17 @@ export class RazorpayProviderAdapter
       return "CUSTOMER_ACTION_REQUIRED";
     }
 
-    // 8. PROVIDER (gateway / processor processing failure, or source is gateway/business).
-    // Requires specific gateway/processor evidence, not a bare "provider"/"error"
-    // combination — too generic, and would misfire on ambiguous messages such as
-    // "unknown provider error".
+    // 8. PROVIDER (gateway / processor processing failure). Requires specific
+    // gateway/processor evidence — never a bare error.source of "gateway" or
+    // "business" alone. Razorpay's test-mode sandbox returns source: "gateway"
+    // with a wholly generic { code: BAD_REQUEST_ERROR, reason: payment_failed,
+    // description: "Payment failed" } for many failures that are genuinely
+    // card/issuer declines, not provider-side outages. Trusting source alone
+    // here would auto-recommend RETRY_PAYMENT on what may be a permanent card
+    // decline — exactly the blind retry this system exists to prevent. Absent
+    // a specific outage/processor signal, this falls through to UNKNOWN so ML
+    // scoring and manual review are engaged instead of a confident guess.
     if (
-      normalizedSource === "gateway" ||
-      normalizedSource === "business" ||
       combined.includes("gateway error") ||
       combined.includes("processor error") ||
       combined.includes("internal gateway error") ||
