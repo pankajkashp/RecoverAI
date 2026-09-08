@@ -5,9 +5,7 @@
   "workspaces": [
     "app/frontend",
     "app/backend",
-    "packages/shared",
     "packages/contracts",
-    "packages/config",
     "integrations"
   ],
   "scripts": {
